@@ -1,0 +1,3 @@
+AlertID,PRN,StudentPhone,ParentPhone,Target,Message,DateTime,Sender
+0416044c-715b-4703-b59e-4f3163e01fb7,2041,7822916528,9380581772,student,Your attendance is low. Please attend classes regularly.,2025-09-18 13:28:13,system
+87873f81-d760-4f6a-b6ab-44248dad7d16,5010,1236547890,7894563210,student,Your attendance is low. Please attend classes regularly.,2025-09-24 22:09:05,system
