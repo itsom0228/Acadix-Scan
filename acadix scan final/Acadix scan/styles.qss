@@ -1,12 +1,10 @@
-/* Acadix Scan - Modern UI Theme */
-/* Inspired by modern social media and management apps */
+﻿/* Acadix Scan - Modern UI Theme (QSS Compatible - No CSS-only properties) */
 
 /* Global Styles */
 QWidget {
     font-family: 'Segoe UI', Arial, sans-serif;
     font-size: 13px;
     color: #333333;
-    transition: all 0.3s ease;
 }
 
 QMainWindow {
@@ -23,62 +21,47 @@ QPushButton {
     font-weight: 600;
     font-size: 13px;
     min-height: 20px;
-    box-shadow: 0 2px 5px rgba(67, 97, 238, 0.3);
 }
 
 QPushButton:hover {
     background-color: #3a56d4;
-    box-shadow: 0 4px 8px rgba(67, 97, 238, 0.4);
-    transform: translateY(-1px);
 }
 
 QPushButton:pressed {
     background-color: #2e46c0;
-    box-shadow: 0 1px 3px rgba(67, 97, 238, 0.2);
-    transform: translateY(1px);
 }
 
 QPushButton:disabled {
     background-color: #b3b3b3;
     color: #e6e6e6;
-    box-shadow: none;
 }
 
 QPushButton#secondary {
     background-color: #f8f9fa;
     color: #495057;
     border: 1px solid #ced4da;
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
 }
 
 QPushButton#secondary:hover {
     background-color: #e9ecef;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.08);
-    transform: translateY(-1px);
 }
 
 QPushButton#danger {
     background-color: #e74c3c;
     color: white;
-    box-shadow: 0 2px 5px rgba(231, 76, 60, 0.3);
 }
 
 QPushButton#danger:hover {
     background-color: #c0392b;
-    box-shadow: 0 4px 8px rgba(231, 76, 60, 0.4);
-    transform: translateY(-1px);
 }
 
 QPushButton#success {
     background-color: #20c997;
     color: white;
-    box-shadow: 0 2px 5px rgba(32, 201, 151, 0.3);
 }
 
 QPushButton#success:hover {
     background-color: #1ba37e;
-    box-shadow: 0 4px 8px rgba(32, 201, 151, 0.4);
-    transform: translateY(-1px);
 }
 
 /* Navigation Buttons */
@@ -91,7 +74,6 @@ QPushButton[class="nav-button"] {
     font-weight: 500;
     margin: 4px 10px;
     border-left: 3px solid transparent;
-    transition: all 0.2s ease;
 }
 
 QPushButton[class="nav-button"]:hover {
@@ -115,13 +97,10 @@ QLineEdit, QTextEdit, QComboBox {
     padding: 12px;
     background-color: white;
     selection-background-color: #4361ee;
-    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05);
-    transition: all 0.2s ease;
 }
 
 QLineEdit:focus, QTextEdit:focus, QComboBox:focus {
     border: 1px solid #4361ee;
-    box-shadow: 0 0 0 3px rgba(67, 97, 238, 0.15);
 }
 
 QLineEdit:hover, QTextEdit:hover, QComboBox:hover {
@@ -159,13 +138,9 @@ QWidget#card {
     background-color: white;
     border-radius: 16px;
     border: 1px solid #e9ecef;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-    transition: all 0.3s ease;
 }
 
 QWidget#card:hover {
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
-    transform: translateY(-2px);
 }
 
 /* Special Cards */
@@ -173,13 +148,11 @@ QWidget#highlight-card {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #4361ee, stop:1 #3a56d4);
     border-radius: 16px;
     color: white;
-    box-shadow: 0 10px 20px rgba(67, 97, 238, 0.3);
 }
 
 QWidget#splash-content {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(67, 97, 238, 0.9), stop:1 rgba(58, 86, 212, 0.9));
     border-radius: 24px;
-    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
 }
 
 /* Tables */
@@ -189,7 +162,6 @@ QTableWidget {
     border: none;
     border-radius: 12px;
     alternate-background-color: #f8f9fa;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
 }
 
 QTableWidget::item {
@@ -259,7 +231,6 @@ QWidget#sidebar {
     min-width: 260px;
     max-width: 260px;
     border-right: 1px solid rgba(0, 0, 0, 0.1);
-    box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
 }
 
 /* Progress Bar */
@@ -329,13 +300,9 @@ QWidget[class="dashboard-card"] {
     background-color: white;
     border-radius: 16px;
     padding: 20px;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
-    transition: all 0.3s ease;
 }
 
 QWidget[class="dashboard-card"]:hover {
-    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
-    transform: translateY(-2px);
 }
 
 QWidget[class="dashboard-card-primary"] {

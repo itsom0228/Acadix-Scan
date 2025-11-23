@@ -24,11 +24,14 @@ from PyQt5.QtWidgets import (
     QProgressBar,
     QFrame,
 )
-from PyQt5.QtGui import QFontDatabase, QFont
+from PyQt5.QtGui import QFontDatabase, QFont, QColor
 
 from data_manager import (
     register_student,
+    register_teacher,
     authenticate_student,
+    authenticate_teacher,
+    authenticate_admin,
     forgot_password_flow,
     list_all_students,
     total_registered_students,
@@ -42,13 +45,28 @@ from data_manager import (
     upsert_internal_marks,
     low_attendance_report,
     send_alert,
+    get_all_teachers,
+    update_teacher_status,
+    get_pending_teachers,
+    get_pending_teachers_count,
+    get_available_subjects,
 )
-from ui_components import SplashScreen, RoleSelection, StudentLogin, AdminLogin, StudentSignup, AssistantWidget
+from ui_components import (
+    SplashScreen,
+    RoleSelection,
+    StudentLogin,
+    AdminLogin,
+    StudentSignup,
+    TeacherSignup,
+    TeacherLogin,
+    AssistantWidget,
+    LogoWidget,
+)
 from face_utils import capture_faces_from_ipcam, train_model, recognize_from_ipcam_and_mark
 
 
-ADMIN_ID = "teacher@coe"
-ADMIN_PWD = "Python@313"
+# Admin credentials moved to data_manager.py (admins.csv)
+# Default: admin@acadix / Admin@123
 
 
 # Load application stylesheet
@@ -76,16 +94,20 @@ class MainWindow(QMainWindow):
 
         # Auth flow
         self.splash = SplashScreen(self.to_role_selection)
-        self.role = RoleSelection(self.to_student_login, self.to_admin_login)
-        self.student_login = StudentLogin(self.student_do_login, self.to_student_signup, self.student_forgot)
-        self.admin_login = AdminLogin(self.admin_do_login)
-        self.student_signup = StudentSignup(self.student_do_signup)
+        self.role = RoleSelection(self.to_student_login, self.to_teacher_login, self.to_admin_login)
+        self.student_login = StudentLogin(self.student_do_login, self.to_student_signup, self.student_forgot, self.to_role_selection)
+        self.teacher_login = TeacherLogin(self.teacher_do_login, self.to_teacher_signup, self.to_role_selection)
+        self.admin_login = AdminLogin(self.admin_do_login, self.to_role_selection)
+        self.student_signup = StudentSignup(self.student_do_signup, self.to_role_selection, self.to_student_login)
+        self.teacher_signup = TeacherSignup(self.teacher_do_signup, self.to_teacher_login, self.to_role_selection)
 
         self.stack.addWidget(self.splash)
         self.stack.addWidget(self.role)
         self.stack.addWidget(self.student_login)
+        self.stack.addWidget(self.teacher_login)
         self.stack.addWidget(self.admin_login)
         self.stack.addWidget(self.student_signup)
+        self.stack.addWidget(self.teacher_signup)
 
         # Main app containers
         self.app_container = QWidget()
@@ -93,6 +115,7 @@ class MainWindow(QMainWindow):
 
         self.current_user = None  # dict for student, or None for admin
         self.is_admin = False
+        self.is_teacher = False
 
         self.stack.setCurrentWidget(self.splash)
 
@@ -102,6 +125,12 @@ class MainWindow(QMainWindow):
 
     def to_student_login(self):
         self.stack.setCurrentWidget(self.student_login)
+
+    def to_teacher_login(self):
+        self.stack.setCurrentWidget(self.teacher_login)
+
+    def to_teacher_signup(self):
+        self.stack.setCurrentWidget(self.teacher_signup)
 
     def to_admin_login(self):
         self.stack.setCurrentWidget(self.admin_login)
@@ -115,6 +144,20 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Signup", msg if ok else msg)
         if ok:
             self.to_student_login()
+
+    def teacher_do_signup(self, data: dict):
+        ok, msg = register_teacher(data)
+        if ok:
+            # Show success message with approval notice
+            QMessageBox.information(
+                self, "Sign Up Successful",
+                "Sign up successful! Please wait for admin approval.\n"
+                "You will be able to login once your account is approved."
+            )
+            # go back to teacher login where teacher cannot login until approved
+            self.to_teacher_login()
+        else:
+            QMessageBox.warning(self, "Sign Up Failed", msg)
 
     def student_do_login(self, student_id: str, password: str):
         ok, user = authenticate_student(student_id, password)
@@ -144,12 +187,24 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Forgot Password", "Security answer incorrect or user not found.")
 
     def admin_do_login(self, admin_id: str, password: str):
-        if admin_id == ADMIN_ID and password == ADMIN_PWD:
-            self.current_user = None
-            self.is_admin = True
-            self.init_main_app()
-        else:
+        ok, user = authenticate_admin(admin_id, password)
+        if not ok:
             QMessageBox.warning(self, "Admin Login", "Invalid admin credentials.")
+            return
+        self.current_user = user
+        self.is_admin = True
+        self.is_teacher = False
+        self.init_main_app()
+
+    def teacher_do_login(self, teacher_id: str, password: str):
+        ok, user, msg = authenticate_teacher(teacher_id, password)
+        if not ok:
+            QMessageBox.warning(self, "Teacher Login", msg)
+            return
+        self.current_user = user
+        self.is_admin = False
+        self.is_teacher = True
+        self.init_main_app()
 
     # Main app UI
     def init_main_app(self):
@@ -173,8 +228,9 @@ class MainWindow(QMainWindow):
         # Navigation sidebar
         sidebar = QWidget()
         sidebar.setObjectName("sidebar")
+        # Use a subtle black gradient for the navigation sidebar to match dark theme
         sidebar.setStyleSheet(
-            "#sidebar { background-color: #0000ff; border: none; }"
+            "#sidebar { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #000000, stop:1 #111111); border: none; }"
         )
         
         nav_layout = QVBoxLayout(sidebar)
@@ -257,113 +313,156 @@ class MainWindow(QMainWindow):
         nav_buttons_layout.setContentsMargins(0, 10, 0, 10)
         nav_buttons_layout.setSpacing(5)
         
-        # Create navigation buttons with icons (using emoji as placeholders)
-        btn_dashboard = QPushButton("  Dashboard")
-        btn_dashboard.setObjectName("nav-button")
-        btn_dashboard.setProperty("class", "nav-button")
-        btn_dashboard.clicked.connect(self.show_dashboard)
-        btn_dashboard.setCheckable(True)
-        btn_dashboard.setChecked(True)  # Default selected
-        
-        btn_train = QPushButton("  Train Face Data")
-        btn_train.setObjectName("nav-button")
-        btn_train.setProperty("class", "nav-button")
-        btn_train.setCheckable(True)
-        
-        # Recognize button removed for students - moved to admin only
-        
-        btn_attendance = QPushButton("  Attendance")
-        btn_attendance.setObjectName("nav-button")
-        btn_attendance.setProperty("class", "nav-button")
-        btn_attendance.clicked.connect(self.show_attendance)
-        btn_attendance.setCheckable(True)
-        
-        btn_settings = QPushButton("  Settings")
-        btn_settings.setObjectName("nav-button")
-        btn_settings.setProperty("class", "nav-button")
-        btn_settings.clicked.connect(self.show_settings)
-        btn_settings.setCheckable(True)
-        
+        # Navigation buttons based on user role
         btn_logout = QPushButton("  Logout")
         btn_logout.setObjectName("nav-button")
         btn_logout.setProperty("class", "nav-button")
         btn_logout.clicked.connect(self.logout)
         
-        if not self.is_admin:
-            btn_train.clicked.connect(self.show_train)
-            # Recognize functionality moved to admin only
-        
-        # Add buttons to navigation layout
-        nav_buttons_layout.addWidget(btn_dashboard)
-        if not self.is_admin:
-            nav_buttons_layout.addWidget(btn_train)
-        else:
-            # Admin gets recognize functionality
+        if self.is_admin:
+            # Admin: Only 3 navigations - Approve Faculty, View Faculty, Settings
+            btn_approve_faculty = QPushButton("  Approve Faculty")
+            btn_approve_faculty.setObjectName("nav-button")
+            btn_approve_faculty.setProperty("class", "nav-button")
+            btn_approve_faculty.setCheckable(True)
+            btn_approve_faculty.setChecked(True)  # Default selected
+            btn_approve_faculty.clicked.connect(self.show_teacher_approvals)
+            nav_buttons_layout.addWidget(btn_approve_faculty)
+            
+            btn_view_faculty = QPushButton("  View Faculty")
+            btn_view_faculty.setObjectName("nav-button")
+            btn_view_faculty.setProperty("class", "nav-button")
+            btn_view_faculty.setCheckable(True)
+            btn_view_faculty.clicked.connect(self.show_view_faculty)
+            nav_buttons_layout.addWidget(btn_view_faculty)
+            
+            btn_settings = QPushButton("  Settings")
+            btn_settings.setObjectName("nav-button")
+            btn_settings.setProperty("class", "nav-button")
+            btn_settings.setCheckable(True)
+            btn_settings.clicked.connect(self.show_settings)
+            nav_buttons_layout.addWidget(btn_settings)
+            
+        elif self.is_teacher:
+            # Teacher: All previous admin functions
+            btn_dashboard = QPushButton("  Dashboard")
+            btn_dashboard.setObjectName("nav-button")
+            btn_dashboard.setProperty("class", "nav-button")
+            btn_dashboard.clicked.connect(self.show_dashboard)
+            btn_dashboard.setCheckable(True)
+            btn_dashboard.setChecked(True)  # Default selected
+            nav_buttons_layout.addWidget(btn_dashboard)
+            
+            btn_todays_attendance = QPushButton("  Today's Attendance")
+            btn_todays_attendance.setObjectName("nav-button")
+            btn_todays_attendance.setProperty("class", "nav-button")
+            btn_todays_attendance.setCheckable(True)
+            btn_todays_attendance.clicked.connect(self.show_todays_attendance)
+            nav_buttons_layout.addWidget(btn_todays_attendance)
+            
             btn_recognize = QPushButton("  Recognize Face")
             btn_recognize.setObjectName("nav-button")
             btn_recognize.setProperty("class", "nav-button")
             btn_recognize.setCheckable(True)
             btn_recognize.clicked.connect(self.show_recognize)
             nav_buttons_layout.addWidget(btn_recognize)
-            # Admin-only management buttons
+            
             btn_add_student = QPushButton("  Manage Students")
             btn_add_student.setObjectName("nav-button")
             btn_add_student.setProperty("class", "nav-button")
             btn_add_student.setCheckable(False)
             btn_add_student.clicked.connect(self.show_add_student)
             nav_buttons_layout.addWidget(btn_add_student)
-
-            # Admin-only academic records button
+            
             btn_internal = QPushButton("  Academic Records")
             btn_internal.setObjectName("nav-button")
             btn_internal.setProperty("class", "nav-button")
             btn_internal.setCheckable(True)
             btn_internal.clicked.connect(self.show_internal_marks)
             nav_buttons_layout.addWidget(btn_internal)
-            # Admin-only low attendance button
+            
             btn_low_att = QPushButton("  Low Attendance")
             btn_low_att.setObjectName("nav-button")
             btn_low_att.setProperty("class", "nav-button")
             btn_low_att.setCheckable(True)
             btn_low_att.clicked.connect(self.show_low_attendance)
             nav_buttons_layout.addWidget(btn_low_att)
-        # Student academic records button (view only)
-        if not self.is_admin:
+            
+            btn_settings = QPushButton("  Settings")
+            btn_settings.setObjectName("nav-button")
+            btn_settings.setProperty("class", "nav-button")
+            btn_settings.setCheckable(True)
+            btn_settings.clicked.connect(self.show_settings)
+            nav_buttons_layout.addWidget(btn_settings)
+            
+        else:
+            # Student navigation
+            btn_dashboard = QPushButton("  Dashboard")
+            btn_dashboard.setObjectName("nav-button")
+            btn_dashboard.setProperty("class", "nav-button")
+            btn_dashboard.clicked.connect(self.show_dashboard)
+            btn_dashboard.setCheckable(True)
+            btn_dashboard.setChecked(True)  # Default selected
+            nav_buttons_layout.addWidget(btn_dashboard)
+            
+            btn_train = QPushButton("  Train Face Data")
+            btn_train.setObjectName("nav-button")
+            btn_train.setProperty("class", "nav-button")
+            btn_train.setCheckable(True)
+            btn_train.clicked.connect(self.show_train)
+            nav_buttons_layout.addWidget(btn_train)
+            
+            btn_attendance = QPushButton("  Attendance")
+            btn_attendance.setObjectName("nav-button")
+            btn_attendance.setProperty("class", "nav-button")
+            btn_attendance.clicked.connect(self.show_attendance)
+            btn_attendance.setCheckable(True)
+            nav_buttons_layout.addWidget(btn_attendance)
+            
             btn_internal = QPushButton("  Academic Records")
             btn_internal.setObjectName("nav-button")
             btn_internal.setProperty("class", "nav-button")
             btn_internal.setCheckable(True)
             btn_internal.clicked.connect(self.show_internal_marks)
             nav_buttons_layout.addWidget(btn_internal)
-
-        nav_buttons_layout.addWidget(btn_attendance)
-        nav_buttons_layout.addWidget(btn_settings)
+            
+            btn_settings = QPushButton("  Settings")
+            btn_settings.setObjectName("nav-button")
+            btn_settings.setProperty("class", "nav-button")
+            btn_settings.setCheckable(True)
+            btn_settings.clicked.connect(self.show_settings)
+            nav_buttons_layout.addWidget(btn_settings)
+        
         nav_buttons_layout.addStretch(1)
         nav_buttons_layout.addWidget(btn_logout)
         
         nav_layout.addWidget(nav_buttons)
         
-        # User info at bottom of sidebar
-        if not self.is_admin and self.current_user:
-            user_info = QWidget()
-            user_info.setObjectName("user-info")
-            user_info.setStyleSheet(
-                "#user-info { background-color: rgba(255, 255, 255, 0.05); border-top: 1px solid rgba(255, 255, 255, 0.1); }"
-            )
-            user_layout = QHBoxLayout(user_info)
-            
-            # User avatar placeholder
-            user_avatar = QLabel("👤")
-            user_avatar.setStyleSheet("font-size: 18px; color: white;")
-            
-            # User name
-            user_name = QLabel(self.current_user.get("FullName", "User"))
-            user_name.setStyleSheet("color: white; font-weight: bold;")
-            
-            user_layout.addWidget(user_avatar)
-            user_layout.addWidget(user_name)
-            
-            nav_layout.addWidget(user_info)
+        # User info at bottom of sidebar - for all users
+        user_info = QWidget()
+        user_info.setObjectName("user-info")
+        user_info.setStyleSheet(
+            "#user-info { background-color: rgba(255, 255, 255, 0.05); border-top: 1px solid rgba(255, 255, 255, 0.1); }"
+        )
+        user_layout = QHBoxLayout(user_info)
+        
+        # User avatar placeholder
+        user_avatar = QLabel("👤")
+        user_avatar.setStyleSheet("font-size: 18px; color: white;")
+        
+        # User name
+        if self.is_admin:
+            user_name = QLabel(self.current_user.get("FullName", "Admin") if self.current_user else "Admin")
+        elif self.is_teacher:
+            user_name = QLabel(self.current_user.get("FullName", "Teacher") if self.current_user else "Teacher")
+        else:
+            user_name = QLabel(self.current_user.get("FullName", "Student") if self.current_user else "Student")
+        user_name.setStyleSheet("color: white; font-weight: bold;")
+        
+        user_layout.addWidget(user_avatar)
+        user_layout.addWidget(user_name)
+        
+        nav_layout.addWidget(user_info)
         
         # Content area
         content_widget = QWidget()
@@ -395,8 +494,11 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(ct)
         self.stack.setCurrentWidget(ct)
         
-        # Show default view
-        self.show_dashboard()
+        # Show default view based on role
+        if self.is_admin:
+            self.show_teacher_approvals()
+        else:
+            self.show_dashboard()
 
     def clear_content(self):
         while self.content.count():
@@ -779,21 +881,310 @@ class MainWindow(QMainWindow):
             
             scroll_layout.addWidget(students_section)
             
+        elif self.is_teacher:
+            # Teacher dashboard with subject filter
+            import data_manager as dm
+            
+            # Subject selection dropdown
+            subject_filter_row = QWidget()
+            subject_filter_layout = QHBoxLayout(subject_filter_row)
+            subject_filter_layout.setContentsMargins(0, 0, 0, 0)
+            subject_filter_layout.setSpacing(10)
+            
+            subject_label = QLabel("Select Subject:")
+            subject_label.setStyleSheet("font-size: 16px; font-weight: 500; color: #212529;")
+            
+            subject_combo = QComboBox()
+            subjects = get_available_subjects()
+            subject_combo.addItem("All Subjects")
+            subject_combo.addItems(subjects)
+            subject_combo.setStyleSheet(
+                "QComboBox { border: 1px solid #CED4DA; border-radius: 4px; padding: 8px; "
+                "font-size: 14px; min-width: 200px; }"
+                "QComboBox::drop-down { border: none; width: 20px; }"
+            )
+            
+            subject_filter_layout.addWidget(subject_label)
+            subject_filter_layout.addWidget(subject_combo)
+            subject_filter_layout.addStretch()
+            
+            scroll_layout.addWidget(subject_filter_row)
+            
+            # Stats row with cards
+            stats_container = QWidget()
+            stats_container.setObjectName("stats-container")
+            stats_layout = QHBoxLayout(stats_container)
+            stats_layout.setContentsMargins(0, 0, 0, 0)
+            stats_layout.setSpacing(20)
+            
+            # Total Registered Students card
+            total_students = total_registered_students()
+            students_card = QWidget()
+            students_card.setObjectName("card")
+            students_card.setStyleSheet(
+                "#card { background: white; border-radius: 12px; border: 1px solid #e9ecef; "
+                "padding: 20px; border-left: 4px solid #4361EE; }"
+            )
+            students_layout = QVBoxLayout(students_card)
+            students_layout.setContentsMargins(0, 0, 0, 0)
+            students_layout.setSpacing(10)
+            
+            students_icon = QLabel("👨‍🎓")
+            students_icon.setStyleSheet("font-size: 32px;")
+            
+            students_count = QLabel(str(total_students))
+            students_count.setStyleSheet("font-size: 36px; font-weight: bold; color: #212529;")
+            
+            students_label = QLabel("Total Registered Students")
+            students_label.setStyleSheet("font-size: 14px; color: #6C757D; font-weight: 500;")
+            
+            students_layout.addWidget(students_icon)
+            students_layout.addWidget(students_count)
+            students_layout.addWidget(students_label)
+            
+            # Total Present Students card (will be updated based on subject)
+            today = datetime.now().strftime("%d-%m-%Y")
+            present_card = QWidget()
+            present_card.setObjectName("card")
+            present_card.setStyleSheet(
+                "#card { background: white; border-radius: 12px; border: 1px solid #e9ecef; "
+                "padding: 20px; border-left: 4px solid #20C997; }"
+            )
+            present_layout = QVBoxLayout(present_card)
+            present_layout.setContentsMargins(0, 0, 0, 0)
+            present_layout.setSpacing(10)
+            
+            present_icon = QLabel("✅")
+            present_icon.setStyleSheet("font-size: 32px;")
+            
+            self.present_count_label = QLabel("0")
+            self.present_count_label.setStyleSheet("font-size: 36px; font-weight: bold; color: #212529;")
+            
+            self.present_label = QLabel("Total Present Students")
+            self.present_label.setStyleSheet("font-size: 14px; color: #6C757D; font-weight: 500;")
+            
+            present_layout.addWidget(present_icon)
+            present_layout.addWidget(self.present_count_label)
+            present_layout.addWidget(self.present_label)
+            
+            # Function to update stats based on subject selection
+            def update_stats():
+                selected_subject = subject_combo.currentText()
+                summary = attendance_summary_for_date(today, selected_subject if selected_subject != "All Subjects" else None)
+                
+                self.present_count_label.setText(str(summary['present']))
+                if selected_subject != "All Subjects":
+                    self.present_label.setText(f"Present ({selected_subject})")
+                else:
+                    self.present_label.setText("Total Present Students (All Subjects)")
+            
+            # Initial update
+            update_stats()
+            
+            # Connect subject change to update stats
+            subject_combo.currentIndexChanged.connect(update_stats)
+            
+            stats_layout.addWidget(students_card)
+            stats_layout.addWidget(present_card)
+            
+            scroll_layout.addWidget(stats_container)
+            
+            # Student Records section (like admin dashboard)
+            students_section = QWidget()
+            students_section.setObjectName("card")
+            students_layout = QVBoxLayout(students_section)
+            
+            students_header = QLabel("Student Records")
+            students_header.setStyleSheet("font-size: 18px; font-weight: bold; color: #212529; margin-bottom: 15px;")
+            
+            students_df = list_all_students()
+            table2 = self._df_to_table(students_df, editable=True)
+            table2.setStyleSheet(
+                "QTableView { border: none; alternate-background-color: #F1F3F5; }"
+                "QHeaderView::section { background-color: #4361EE; color: white; padding: 6px; }"
+            )
+            
+            save_btn = QPushButton("Save Changes")
+            save_btn.setObjectName("primary")
+            save_btn.setFixedWidth(150)
+            
+            def save_changes():
+                updated = self._table_to_df(table2)
+                save_students_dataframe(updated)
+                QMessageBox.information(self, "Success", "Student records saved successfully.")
+            
+            save_btn.clicked.connect(save_changes)
+            
+            # Edit selected student button
+            edit_btn = QPushButton("Edit Selected")
+            edit_btn.setFixedWidth(150)
+
+            def on_edit_selected():
+                selected = table2.currentRow()
+                if selected < 0:
+                    QMessageBox.information(self, "Select", "Please select a student row to edit.")
+                    return
+                # Get StudentID from table
+                cols = [table2.horizontalHeaderItem(i).text() for i in range(table2.columnCount())]
+                try:
+                    sid_index = cols.index('StudentID')
+                except ValueError:
+                    QMessageBox.warning(self, "Error", "StudentID column not found.")
+                    return
+                sid_item = table2.item(selected, sid_index)
+                student_id = sid_item.text() if sid_item else ""
+                if not student_id:
+                    QMessageBox.warning(self, "Error", "Selected row has no StudentID.")
+                    return
+
+                # Load current student record
+                import data_manager as dm
+                student = dm.get_student_by_id(student_id)
+                if not student:
+                    QMessageBox.warning(self, "Not Found", "Student not found in database.")
+                    return
+
+                # Show simple edit dialog
+                from PyQt5.QtWidgets import QDialog, QFormLayout, QDialogButtonBox
+
+                dlg = QDialog(self)
+                dlg.setWindowTitle(f"Edit Student: {student.get('FullName','')}")
+                form = QFormLayout(dlg)
+
+                phone_edit = QLineEdit(student.get('StudentPhone',''))
+                parent_edit = QLineEdit(student.get('ParentPhone',''))
+                address_edit = QLineEdit(student.get('Address',''))
+                password_edit = QLineEdit('')
+                password_edit.setPlaceholderText('(leave blank to keep)')
+                pwd_confirm = QLineEdit('')
+                pwd_confirm.setPlaceholderText('(confirm if changing)')
+                security_edit = QLineEdit(student.get('SecurityAnswer',''))
+
+                form.addRow('Student Phone', phone_edit)
+                form.addRow("Parent's Phone", parent_edit)
+                form.addRow('Address', address_edit)
+                form.addRow('New Password', password_edit)
+                form.addRow('Confirm Password', pwd_confirm)
+                form.addRow('Security Answer', security_edit)
+
+                buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+                buttons.accepted.connect(dlg.accept)
+                buttons.rejected.connect(dlg.reject)
+                form.addRow(buttons)
+
+                if dlg.exec_() == QDialog.Accepted:
+                    updates = {
+                        'StudentPhone': phone_edit.text().strip(),
+                        'ParentPhone': parent_edit.text().strip(),
+                        'Address': address_edit.text().strip(),
+                        'SecurityAnswer': security_edit.text().strip(),
+                    }
+                    new_pwd = password_edit.text().strip()
+                    confirm_pwd = pwd_confirm.text().strip()
+                    if new_pwd:
+                        if new_pwd != confirm_pwd:
+                            QMessageBox.warning(self, 'Password', 'New password and confirm password do not match.')
+                            return
+                        updates['Password'] = new_pwd
+
+                    ok, msg = update_student_profile(student_id, updates)
+                    if ok:
+                        QMessageBox.information(self, 'Updated', msg)
+                        # refresh dashboard which will reload the students table
+                        self.show_dashboard()
+                    else:
+                        QMessageBox.warning(self, 'Error', msg)
+
+            edit_btn.clicked.connect(on_edit_selected)
+            
+            # Place edit and save buttons side by side
+            btn_row = QWidget()
+            btn_layout = QHBoxLayout(btn_row)
+            btn_layout.setContentsMargins(0, 0, 0, 0)
+            btn_layout.addStretch()
+            btn_layout.addWidget(edit_btn)
+            btn_layout.addWidget(save_btn)
+
+            # Export buttons for students
+            export_st_xlsx = QPushButton('Export Students to Excel')
+            export_st_xlsx.setFixedWidth(200)
+            export_st_csv = QPushButton('Export Students to CSV')
+            export_st_csv.setFixedWidth(160)
+            export_st_pdf = QPushButton('Save Students as PDF')
+            export_st_pdf.setFixedWidth(180)
+
+            def export_st_excel():
+                from PyQt5.QtWidgets import QFileDialog
+                path, _ = QFileDialog.getSaveFileName(self, 'Save Students as Excel', 'students.xlsx', 'Excel Files (*.xlsx)')
+                if not path:
+                    return
+                try:
+                    students_df.to_excel(path, index=False)
+                    QMessageBox.information(self, 'Exported', f'Students exported to {path}')
+                except Exception as e:
+                    QMessageBox.warning(self, 'Error', f'Export failed: {e}')
+
+            def export_st_csv_handler():
+                from PyQt5.QtWidgets import QFileDialog
+                path, _ = QFileDialog.getSaveFileName(self, 'Save Students as CSV', 'students.csv', 'CSV Files (*.csv)')
+                if not path:
+                    return
+                try:
+                    students_df.to_csv(path, index=False)
+                    QMessageBox.information(self, 'Exported', f'Students exported to {path}')
+                except Exception as e:
+                    QMessageBox.warning(self, 'Error', f'Export failed: {e}')
+
+            def export_st_pdf_handler():
+                from PyQt5.QtWidgets import QFileDialog
+                path, _ = QFileDialog.getSaveFileName(self, 'Save Students as PDF', 'students.pdf', 'PDF Files (*.pdf)')
+                if not path:
+                    return
+                try:
+                    from reportlab.lib.pagesizes import letter
+                    from reportlab.pdfgen import canvas
+                    c = canvas.Canvas(path, pagesize=letter)
+                    text = c.beginText(40, 750)
+                    rows = [students_df.columns.tolist()] + students_df.values.tolist()
+                    for row in rows:
+                        line = ' | '.join([str(x) for x in row])
+                        text.textLine(line)
+                    c.drawText(text)
+                    c.save()
+                    QMessageBox.information(self, 'Exported', f'Students saved to PDF: {path}')
+                except Exception:
+                    html_path = path.replace('.pdf', '.html')
+                    students_df.to_html(html_path, index=False)
+                    QMessageBox.information(self, 'Fallback', f'Reportlab not available. Saved HTML to {html_path}. Convert to PDF externally.')
+
+            export_st_xlsx.clicked.connect(export_st_excel)
+            export_st_csv.clicked.connect(export_st_csv_handler)
+            export_st_pdf.clicked.connect(export_st_pdf_handler)
+
+            st_export_row = QWidget()
+            st_export_layout = QHBoxLayout(st_export_row)
+            st_export_layout.setContentsMargins(0, 0, 0, 0)
+            st_export_layout.addStretch()
+            st_export_layout.addWidget(export_st_xlsx)
+            st_export_layout.addWidget(export_st_csv)
+            st_export_layout.addWidget(export_st_pdf)
+            
+            students_layout.addWidget(students_header)
+            students_layout.addWidget(st_export_row)
+            students_layout.addWidget(table2)
+            students_layout.addWidget(btn_row, 0, Qt.AlignRight)
+            
+            scroll_layout.addWidget(students_section)
+            
         else:
-            # Student dashboard
+            # Student dashboard - NEW DESIGN
             
             # Welcome message
             welcome = QLabel(f"Welcome back, {self.current_user.get('FullName', '')}!")
             welcome.setStyleSheet("font-size: 24px; font-weight: bold; color: #212529; margin-bottom: 20px;")
             scroll_layout.addWidget(welcome)
             
-            # Stats row with cards
-            stats_container = QWidget()
-            stats_layout = QHBoxLayout(stats_container)
-            stats_layout.setContentsMargins(0, 0, 0, 0)
-            stats_layout.setSpacing(20)
-            
-            # Attendance card - show student's personal attendance
+            # My Attendance Today Card
             today = datetime.now().strftime("%d-%m-%Y")
             from data_manager import student_attendance_summary_for_date
             student_prn = self.current_user.get("PRN", "")
@@ -801,89 +1192,130 @@ class MainWindow(QMainWindow):
             
             attendance_card = QWidget()
             attendance_card.setObjectName("card")
-            attendance_card.setStyleSheet(
-                "#card { border-left: 4px solid #20C997; }"
-            )
             attendance_layout = QVBoxLayout(attendance_card)
             
-            attendance_icon = QLabel("📊")
-            attendance_icon.setStyleSheet("font-size: 24px;")
-            
-            # Show Present/Absent status for students
+            # Determine status based on attendance
             if summary['present'] > 0:
-                status_text = "Present"
-                status_color = "#20C997"  # Green
-                status_icon = "✅"
-            else:
                 status_text = "Absent"
                 status_color = "#DC3545"  # Red
                 status_icon = "❌"
+                card_border_color = "#DC3545"
+            else:
+                status_text =  "Present"
+                status_color = "#20C997"  # Green
+                status_icon = "✅"
+                card_border_color = "#20C997"
             
-            attendance_count = QLabel(f"{status_icon} {status_text}")
-            attendance_count.setStyleSheet(f"font-size: 24px; font-weight: bold; color: {status_color};")
+            attendance_card.setStyleSheet(
+                f"#card {{ background: #FFFFFF; border-radius: 12px; border: 1px solid #e9ecef; "
+                f"padding: 20px; border-left: 4px solid {card_border_color}; }}"
+            )
             
-            attendance_label = QLabel("My Attendance Today")
-            attendance_label.setStyleSheet("font-size: 14px; color: #6C757D;")
+            att_icon_label = QLabel("📊")
+            att_icon_label.setStyleSheet("font-size: 28px;")
             
-            attendance_layout.addWidget(attendance_icon)
-            attendance_layout.addWidget(attendance_count)
-            attendance_layout.addWidget(attendance_label)
+            status_label = QLabel(f"{status_icon} {status_text}")
+            status_label.setStyleSheet(f"font-size: 28px; font-weight: bold; color: {status_color};")
             
-            # Add cards to stats row
-            stats_layout.addWidget(attendance_card)
+            att_title = QLabel("My Attendance Today")
+            att_title.setStyleSheet("font-size: 14px; color: #6C757D; font-weight: 500;")
             
-            # Add stats row to main layout
-            scroll_layout.addWidget(stats_container)
+            attendance_layout.addWidget(att_icon_label)
+            attendance_layout.addWidget(status_label)
+            attendance_layout.addWidget(att_title)
             
-            # Replace personal details with Upcoming Events & Notices and Alerts
+            scroll_layout.addWidget(attendance_card)
+            
+            # Upcoming Events & Notices Section
             events_card = QWidget()
             events_card.setObjectName("card")
+            events_card.setStyleSheet(
+                "#card { background: #FFFFFF; border-radius: 12px; border: 1px solid #e9ecef; padding: 20px; }"
+            )
             events_layout = QVBoxLayout(events_card)
+            
             events_header = QLabel("Upcoming Events & Notices")
             events_header.setStyleSheet("font-size: 18px; font-weight: bold; color: #212529; margin-bottom: 15px;")
             events_layout.addWidget(events_header)
-
+            
+            # Static notices (can be made dynamic later)
             notices = [
                 "Internal assessment schedule will be announced soon.",
                 "Mid-sem examination tentative window next month.",
                 "Attend workshop on AI/ML this Friday, 3 PM.",
             ]
             for note in notices:
-                lbl = QLabel("• " + note)
-                lbl.setStyleSheet("color: #495057; margin: 4px 0;")
-                events_layout.addWidget(lbl)
-
-            # Import the entire data_manager module instead of just the function
+                notice_label = QLabel("• " + note)
+                notice_label.setStyleSheet("color: #495057; margin: 4px 0; line-height: 1.6;")
+                events_layout.addWidget(notice_label)
+            
+            # Check for low attendance alerts
             import data_manager as dm
-            prn = self.current_user.get("PRN", "")
-            alerts_df = dm.get_alerts_for_student(prn)
+            alerts_df = dm.get_alerts_for_student(student_prn)
             if not alerts_df.empty:
-                alerts_header = QLabel("Low Attendance Alerts")
-                alerts_header.setStyleSheet("font-size: 16px; font-weight: bold; color: #DC3545; margin-top: 10px;")
+                alerts_space = QLabel("")
+                alerts_space.setFixedHeight(10)
+                events_layout.addWidget(alerts_space)
+                
+                alerts_header = QLabel("⚠️ Low Attendance Alerts")
+                alerts_header.setStyleSheet("font-size: 16px; font-weight: bold; color: #DC3545; margin-top: 5px;")
                 events_layout.addWidget(alerts_header)
-                for _, a in alerts_df.iterrows():
-                    msg = a.get("Message", "Low attendance alert")
-                    albl = QLabel("• " + msg)
-                    albl.setStyleSheet("color: #DC3545; margin: 2px 0;")
-                    events_layout.addWidget(albl)
-
+                
+                for _, alert_row in alerts_df.iterrows():
+                    msg = alert_row.get("Message", "Low attendance alert")
+                    alert_label = QLabel("• " + msg)
+                    alert_label.setStyleSheet("color: #DC3545; margin: 2px 0;")
+                    events_layout.addWidget(alert_label)
+            
             scroll_layout.addWidget(events_card)
             
-            # Academic performance placeholder
+            # Academic Performance Section
             performance_card = QWidget()
             performance_card.setObjectName("card")
+            performance_card.setStyleSheet(
+                "#card { background: #FFFFFF; border-radius: 12px; border: 1px solid #e9ecef; padding: 20px; }"
+            )
             performance_layout = QVBoxLayout(performance_card)
             
             performance_header = QLabel("Academic Performance")
             performance_header.setStyleSheet("font-size: 18px; font-weight: bold; color: #212529; margin-bottom: 15px;")
-            
-            performance_placeholder = QLabel("Your academic performance data will be displayed here.")
-            performance_placeholder.setStyleSheet("color: #6C757D; font-style: italic;")
-            
             performance_layout.addWidget(performance_header)
-            performance_layout.addWidget(performance_placeholder)
+            
+            # Check if student has marks data
+            marks_df = get_student_internal_marks(student_prn)
+            if marks_df.empty:
+                performance_placeholder = QLabel("Your academic performance data will be displayed here.")
+                performance_placeholder.setStyleSheet("color: #6C757D; font-style: italic;")
+                performance_layout.addWidget(performance_placeholder)
+            else:
+                # Show summary stats
+                try:
+                    marks_df["Obtained"] = pd.to_numeric(marks_df["Obtained"], errors='coerce').fillna(0)
+                    marks_df["MaxTotal"] = pd.to_numeric(marks_df["MaxTotal"], errors='coerce').fillna(100)
+                    marks_df["Percentage"] = (marks_df["Obtained"] / marks_df["MaxTotal"] * 100).round(2)
+                    
+                    avg_percentage = marks_df["Percentage"].mean()
+                    total_subjects = len(marks_df)
+                    
+                    perf_summary = QLabel(f"Average Score: {avg_percentage:.1f}% across {total_subjects} subject(s)")
+                    perf_summary.setStyleSheet("color: #495057; font-size: 14px; font-weight: 500; margin-bottom: 10px;")
+                    performance_layout.addWidget(perf_summary)
+                    
+                    # View detailed button
+                    view_details_btn = QPushButton("View Detailed Report")
+                    view_details_btn.setFixedWidth(180)
+                    view_details_btn.setStyleSheet(
+                        "background-color: #4361EE; color: white; border-radius: 6px; padding: 8px 16px; font-weight: bold;"
+                    )
+                    view_details_btn.clicked.connect(lambda: self.show_student_analytics(student_prn))
+                    performance_layout.addWidget(view_details_btn)
+                except Exception:
+                    performance_placeholder = QLabel("Unable to calculate performance. Check back after marks are entered.")
+                    performance_placeholder.setStyleSheet("color: #6C757D; font-style: italic;")
+                    performance_layout.addWidget(performance_placeholder)
             
             scroll_layout.addWidget(performance_card)
+
         
         # Set the scroll content as the widget for the scroll area
         scroll_area.setWidget(scroll_content)
@@ -1196,6 +1628,163 @@ class MainWindow(QMainWindow):
         
         recognize_btn.clicked.connect(run)
 
+    def show_todays_attendance(self):
+        """Show today's attendance for teachers with subject filter"""
+        if not self.is_teacher:
+            QMessageBox.warning(self, "Access Denied", "Only teachers can view today's attendance.")
+            return
+        self.clear_content()
+        
+        import data_manager as dm
+        
+        # Create a scroll area for the content
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet("QScrollArea { border: none; background-color: #F8F9FA; }")
+        
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(20, 20, 20, 20)
+        scroll_layout.setSpacing(20)
+        
+        # Header
+        header = QLabel("Today's Attendance")
+        header.setStyleSheet("font-size: 28px; font-weight: bold; color: #212529; margin-bottom: 10px;")
+        scroll_layout.addWidget(header)
+        
+        # Current date
+        today = datetime.now().strftime("%d-%m-%Y")
+        current_date = QLabel(f"Date: {today}")
+        current_date.setStyleSheet("font-size: 14px; color: #6C757D; margin-bottom: 20px;")
+        scroll_layout.addWidget(current_date)
+        
+        # Subject filter
+        filter_row = QWidget()
+        filter_layout = QHBoxLayout(filter_row)
+        filter_layout.setContentsMargins(0, 0, 0, 0)
+        filter_layout.setSpacing(10)
+        
+        subject_label = QLabel("Filter by Subject:")
+        subject_label.setStyleSheet("font-size: 16px; font-weight: 500; color: #212529;")
+        
+        subject_combo = QComboBox()
+        subjects = get_available_subjects()
+        subject_combo.addItem("All Subjects")
+        subject_combo.addItems(subjects)
+        subject_combo.setStyleSheet(
+            "QComboBox { border: 1px solid #CED4DA; border-radius: 4px; padding: 8px; "
+            "font-size: 14px; min-width: 200px; }"
+            "QComboBox::drop-down { border: none; width: 20px; }"
+        )
+        
+        filter_layout.addWidget(subject_label)
+        filter_layout.addWidget(subject_combo)
+        filter_layout.addStretch()
+        
+        scroll_layout.addWidget(filter_row)
+        
+        # Stats cards
+        stats_container = QWidget()
+        stats_layout = QHBoxLayout(stats_container)
+        stats_layout.setContentsMargins(0, 0, 0, 0)
+        stats_layout.setSpacing(20)
+        
+        # Summary card
+        summary_card = QWidget()
+        summary_card.setObjectName("card")
+        summary_card.setStyleSheet(
+            "#card { background: white; border-radius: 12px; border: 1px solid #e9ecef; "
+            "padding: 20px; border-left: 4px solid #20C997; }"
+        )
+        summary_layout = QVBoxLayout(summary_card)
+        summary_layout.setContentsMargins(0, 0, 0, 0)
+        summary_layout.setSpacing(10)
+        
+        summary_icon = QLabel("📊")
+        summary_icon.setStyleSheet("font-size: 32px;")
+        
+        self.todays_summary_label = QLabel("0 / 0")
+        self.todays_summary_label.setStyleSheet("font-size: 36px; font-weight: bold; color: #212529;")
+        
+        summary_text = QLabel("Present / Total")
+        summary_text.setStyleSheet("font-size: 14px; color: #6C757D; font-weight: 500;")
+        
+        summary_layout.addWidget(summary_icon)
+        summary_layout.addWidget(self.todays_summary_label)
+        summary_layout.addWidget(summary_text)
+        
+        stats_layout.addWidget(summary_card)
+        stats_layout.addStretch()
+        
+        scroll_layout.addWidget(stats_container)
+        
+        # Attendance table container
+        table_container = QWidget()
+        table_layout = QVBoxLayout(table_container)
+        table_layout.setContentsMargins(0, 0, 0, 0)
+        
+        scroll_layout.addWidget(table_container)
+        
+        # Function to update attendance table
+        def update_attendance_table():
+            selected_subject = subject_combo.currentText()
+            att_df = dm._load_attendance_df()
+            
+            # Filter by today's date
+            today_att = att_df[att_df["Date"] == today].copy()
+            
+            # Filter by subject if selected
+            if selected_subject != "All Subjects" and "Subject" in today_att.columns:
+                today_att = today_att[today_att["Subject"] == selected_subject]
+            
+            # Update summary
+            total_students = total_registered_students()
+            present_count = len(today_att[today_att["Status"].str.lower() == "present"])
+            self.todays_summary_label.setText(f"{present_count} / {total_students}")
+            
+            # Clear previous table
+            while table_layout.count():
+                item = table_layout.takeAt(0)
+                w = item.widget()
+                if w:
+                    w.deleteLater()
+            
+            if today_att.empty:
+                no_data = QLabel("No attendance records for today.")
+                no_data.setStyleSheet("color: #6C757D; font-size: 16px; padding: 20px;")
+                table_layout.addWidget(no_data)
+            else:
+                # Create table
+                att_table = self._df_to_table(today_att, editable=True)
+                att_table.setStyleSheet(
+                    "QTableView { border: none; alternate-background-color: #F1F3F5; }"
+                    "QHeaderView::section { background-color: #4361EE; color: white; padding: 6px; }"
+                )
+                table_layout.addWidget(att_table)
+                
+                # Save button
+                save_btn = QPushButton("Save Attendance Changes")
+                save_btn.setObjectName("primary")
+                save_btn.setFixedWidth(200)
+                
+                def save_changes():
+                    updated_att = self._table_to_df(att_table)
+                    dm._save_attendance_df(updated_att)
+                    QMessageBox.information(self, "Success", "Attendance records saved successfully.")
+                    update_attendance_table()  # Refresh
+                
+                save_btn.clicked.connect(save_changes)
+                table_layout.addWidget(save_btn, 0, Qt.AlignRight)
+        
+        # Initial update
+        update_attendance_table()
+        
+        # Connect subject change
+        subject_combo.currentIndexChanged.connect(update_attendance_table)
+        
+        scroll_area.setWidget(scroll_content)
+        self.content.addWidget(scroll_area)
+
     def show_attendance(self):
         self.clear_content()
         
@@ -1317,12 +1906,11 @@ class MainWindow(QMainWindow):
         filter_container = QWidget()
         filter_container_layout = QHBoxLayout(filter_container)
         filter_container_layout.setContentsMargins(0, 0, 0, 0)
-        
         filter_label = QLabel("Time Period:")
         filter_label.setStyleSheet("color: #495057;")
         
         filter_box = QComboBox()
-        filter_box.addItems(["Today's Attendance", "Last 7 Days", "Last 30 Days", "Last 90 Days"])
+        filter_box.addItems(["Today's Attendance", "Last 7 Days", "Last 15 Days", "Last 30 Days", "This Semester"])
         filter_box.setStyleSheet(
             "QComboBox { border: 1px solid #CED4DA; border-radius: 4px; padding: 8px; }"
             "QComboBox::drop-down { border: none; width: 20px; }"
@@ -1330,6 +1918,11 @@ class MainWindow(QMainWindow):
         
         filter_container_layout.addWidget(filter_label)
         filter_container_layout.addWidget(filter_box, 1)
+        
+        # Add percentage display label
+        self.attendance_percentage_label = QLabel("")
+        self.attendance_percentage_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #4361EE; margin-left: 20px;")
+        filter_container_layout.addWidget(self.attendance_percentage_label)
         
         filter_layout.addWidget(filter_container)
         
@@ -1362,10 +1955,27 @@ class MainWindow(QMainWindow):
                 df = attendance_in_range(1, student_prn)
             elif "7" in choice:
                 df = attendance_in_range(7, student_prn)
+            elif "15" in choice:
+                df = attendance_in_range(15, student_prn)
             elif "30" in choice:
                 df = attendance_in_range(30, student_prn)
+            elif "Semester" in choice:
+                # Get all attendance for this semester (approximating as 120 days)
+                df = attendance_in_range(120, student_prn)
             else:
                 df = attendance_in_range(90, student_prn)
+            
+            # Calculate percentage if student view
+            if student_prn and not df.empty:
+                total_records = len(df)
+                present_records = len(df[df['Status'].str.lower() == 'present'])
+                if total_records > 0:
+                    percentage = (present_records / total_records) * 100
+                    self.attendance_percentage_label.setText(f"Attendance: {percentage:.1f}%")
+                else:
+                    self.attendance_percentage_label.setText("Attendance: N/A")
+            else:
+                self.attendance_percentage_label.setText("")
             
             # Create table (editable only for admin)
             is_editable = self.is_admin
@@ -1387,9 +1997,9 @@ class MainWindow(QMainWindow):
         refresh_table()
 
     def show_low_attendance(self):
-        # Admin-only
-        if not self.is_admin:
-            QMessageBox.warning(self, "Access Denied", "Only admins can view low attendance.")
+        # Teachers and admins can view low attendance
+        if not self.is_teacher and not self.is_admin:
+            QMessageBox.warning(self, "Access Denied", "Only teachers and admins can view low attendance.")
             return
         self.clear_content()
 
@@ -1444,6 +2054,207 @@ class MainWindow(QMainWindow):
         scroll_area.setWidget(scroll_content)
         self.content.addWidget(scroll_area)
 
+    def show_teacher_approvals(self):
+        # Admin-only
+        if not self.is_admin:
+            QMessageBox.warning(self, "Access Denied", "Only admins can approve faculty signups.")
+            return
+        self.clear_content()
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_content = QWidget()
+        layout = QVBoxLayout(scroll_content)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        # Header with notification badge
+        header_row = QWidget()
+        header_layout = QHBoxLayout(header_row)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        
+        header = QLabel("Approve Faculty")
+        header.setStyleSheet("font-size: 28px; font-weight: bold; color: #212529;")
+        header_layout.addWidget(header)
+        
+        # Notification badge showing pending count
+        pending_count = get_pending_teachers_count()
+        if pending_count > 0:
+            badge = QLabel(f"  {pending_count} Pending  ")
+            badge.setStyleSheet(
+                "background-color: #e63946; color: white; border-radius: 12px; "
+                "padding: 4px 12px; font-weight: bold; font-size: 14px;"
+            )
+            header_layout.addWidget(badge)
+        
+        header_layout.addStretch()
+        layout.addWidget(header_row)
+
+        pending = get_pending_teachers()
+        
+        if pending.empty:
+            lbl = QLabel("No pending faculty signups.")
+            lbl.setStyleSheet("color: #6C757D; font-size: 16px; padding: 20px;")
+            layout.addWidget(lbl)
+            scroll_area.setWidget(scroll_content)
+            self.content.addWidget(scroll_area)
+            return
+
+        # Build table-like layout with approve/reject buttons per row
+        for _, row in pending.iterrows():
+            card = QWidget()
+            cl = QHBoxLayout(card)
+            cl.setContentsMargins(15, 12, 15, 12)
+            card.setStyleSheet(
+                "background: white; border-radius: 8px; border: 1px solid #dee2e6; "
+                "margin-bottom: 10px;"
+            )
+            
+            info_layout = QVBoxLayout()
+            info_layout.setSpacing(5)
+            
+            name = QLabel(f"👤 {row.get('FullName','')} ({row.get('TeacherID','')})")
+            name.setStyleSheet("font-weight: 600; font-size: 16px; color: #212529;")
+            
+            dept = QLabel(f"🏢 {row.get('Department','')} | 📧 {row.get('Email','')}")
+            dept.setStyleSheet("color: #6C757D; font-size: 13px;")
+            
+            phone = QLabel(f"📱 {row.get('Phone','')}")
+            phone.setStyleSheet("color: #6C757D; font-size: 13px;")
+            
+            if row.get('Designation'):
+                designation = QLabel(f"🎓 {row.get('Designation','')}")
+                designation.setStyleSheet("color: #6C757D; font-size: 13px;")
+                info_layout.addWidget(designation)
+            
+            info_layout.addWidget(name)
+            info_layout.addWidget(dept)
+            info_layout.addWidget(phone)
+            
+            btn_approve = QPushButton("✓ Approve")
+            btn_approve.setStyleSheet(
+                "background-color: #20c997; color: white; border: none; "
+                "padding: 8px 20px; border-radius: 4px; font-weight: 600;"
+            )
+            btn_approve.setCursor(Qt.PointingHandCursor)
+            
+            btn_reject = QPushButton("✗ Reject")
+            btn_reject.setStyleSheet(
+                "background-color: #dc3545; color: white; border: none; "
+                "padding: 8px 20px; border-radius: 4px; font-weight: 600;"
+            )
+            btn_reject.setCursor(Qt.PointingHandCursor)
+
+            def make_handlers(tid=row.get('TeacherID','')):
+                def do_approve():
+                    if update_teacher_status(tid, "Approved"):
+                        QMessageBox.information(self, "Approved", "Teacher approved successfully.")
+                        self.show_teacher_approvals()  # Refresh
+                    else:
+                        QMessageBox.warning(self, "Error", "Failed to update status.")
+                def do_reject():
+                    reply = QMessageBox.question(
+                        self, "Confirm Rejection",
+                        f"Are you sure you want to reject {row.get('FullName','')}?",
+                        QMessageBox.Yes | QMessageBox.No
+                    )
+                    if reply == QMessageBox.Yes:
+                        if update_teacher_status(tid, "Rejected"):
+                            QMessageBox.information(self, "Rejected", "Teacher rejected.")
+                            self.show_teacher_approvals()  # Refresh
+                        else:
+                            QMessageBox.warning(self, "Error", "Failed to update status.")
+                return do_approve, do_reject
+
+            h_approve, h_reject = make_handlers()
+            btn_approve.clicked.connect(h_approve)
+            btn_reject.clicked.connect(h_reject)
+
+            cl.addLayout(info_layout)
+            cl.addStretch()
+            cl.addWidget(btn_approve)
+            cl.addWidget(btn_reject)
+
+            layout.addWidget(card)
+
+        layout.addStretch()
+        scroll_area.setWidget(scroll_content)
+        self.content.addWidget(scroll_area)
+
+    def show_view_faculty(self):
+        # Admin-only - view all faculty members
+        if not self.is_admin:
+            QMessageBox.warning(self, "Access Denied", "Only admins can view faculty.")
+            return
+        self.clear_content()
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_content = QWidget()
+        layout = QVBoxLayout(scroll_content)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        header = QLabel("View Faculty")
+        header.setStyleSheet("font-size: 28px; font-weight: bold; color: #212529; margin-bottom: 10px;")
+        layout.addWidget(header)
+
+        teachers_df = get_all_teachers()
+        if teachers_df.empty:
+            lbl = QLabel("No faculty members registered.")
+            lbl.setStyleSheet("color:#6C757D;")
+            layout.addWidget(lbl)
+            scroll_area.setWidget(scroll_content)
+            self.content.addWidget(scroll_area)
+            return
+
+        # Build table-like layout for viewing faculty
+        for _, row in teachers_df.iterrows():
+            card = QWidget(); cl = QVBoxLayout(card)
+            cl.setContentsMargins(15,10,15,10)
+            card.setStyleSheet("background-color: white; border-radius: 8px; border: 1px solid #e9ecef;")
+            
+            # Top row with name and ID
+            top_row = QHBoxLayout()
+            name = QLabel(f"👤 {row.get('FullName','')}")
+            name.setStyleSheet("font-weight:600; font-size:14px;")
+            tid = QLabel(f"ID: {row.get('TeacherID','')}")
+            tid.setStyleSheet("color:#6C757D; margin-left:10px;")
+            top_row.addWidget(name)
+            top_row.addWidget(tid)
+            top_row.addStretch()
+            cl.addLayout(top_row)
+            
+            # Details row
+            details = QLabel(f"📧 Email: {row.get('Email','')} | 📱 Phone: {row.get('Phone','')}")
+            details.setStyleSheet("color:#6C757D; font-size:12px;")
+            cl.addWidget(details)
+            
+            # Department and Designation
+            dept_desig = QLabel(f"🏢 {row.get('Department','')} | 💼 {row.get('Designation','')}")
+            dept_desig.setStyleSheet("color:#495057; font-size:12px;")
+            cl.addWidget(dept_desig)
+            
+            # Status
+            status_val = row.get('Status', 'Pending')
+            if status_val == 'Approved':
+                status_text = "✅ Approved"
+                status_color = "#20c997"
+            elif status_val == 'Rejected':
+                status_text = "❌ Rejected"
+                status_color = "#dc3545"
+            else:
+                status_text = "⏳ Pending"
+                status_color = "#ffc107"
+            status = QLabel(f"Status: {status_text}")
+            status.setStyleSheet(f"color: {status_color}; font-weight: 500; font-size: 12px; margin-top: 8px;")
+            cl.addWidget(status)
+
+            layout.addWidget(card)
+
+        scroll_area.setWidget(scroll_content)
+        self.content.addWidget(scroll_area)
+
     def _open_alert_dialog(self, prn: str):
         from PyQt5.QtWidgets import QDialog, QFormLayout, QDialogButtonBox
         import data_manager as dm
@@ -1485,9 +2296,107 @@ class MainWindow(QMainWindow):
         form.addRow(close_box)
         dlg.exec_()
 
+    def show_subject_reports(self, prn: str):
+        """Show subject-wise attendance and marks for student"""
+        self.clear_content()
+        import data_manager as dm
+        
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet("QScrollArea { border: none; background-color: #F8F9FA; }")
+        
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(20, 20, 20, 20)
+        scroll_layout.setSpacing(20)
+        
+        header = QLabel("Subject-wise Attendance & Marks")
+        header.setStyleSheet("font-size: 28px; font-weight: bold; color: #212529; margin-bottom: 10px;")
+        scroll_layout.addWidget(header)
+        
+        # Attendance section
+        att_card = QWidget()
+        att_card.setObjectName("card")
+        att_layout = QVBoxLayout(att_card)
+        
+        att_header = QLabel("Subject-wise Attendance")
+        att_header.setStyleSheet("font-size: 18px; font-weight: bold; color: #212529; margin-bottom: 15px;")
+        att_layout.addWidget(att_header)
+        
+        att_df = dm._load_attendance_df()
+        if "Subject" not in att_df.columns:
+            att_df["Subject"] = "General"
+        
+        user_att = att_df[att_df['PRN'] == str(prn)].copy()
+        
+        if user_att.empty:
+            no_att = QLabel("No attendance records found.")
+            no_att.setStyleSheet("color: #6C757D;")
+            att_layout.addWidget(no_att)
+        else:
+            # Group by subject and calculate attendance
+            subject_att = user_att.groupby('Subject').agg({
+                'Status': lambda x: (x.str.lower() == 'present').sum()
+            }).reset_index()
+            subject_att.columns = ['Subject', 'Present']
+            subject_att['Total'] = user_att.groupby('Subject').size().values
+            subject_att['Percentage'] = (subject_att['Present'] / subject_att['Total'] * 100).round(2)
+            
+            att_table = self._df_to_table(subject_att, editable=False)
+            att_table.setStyleSheet(
+                "QTableView { border: none; alternate-background-color: #F1F3F5; }"
+                "QHeaderView::section { background-color: #4361EE; color: white; padding: 6px; }"
+            )
+            att_layout.addWidget(att_table)
+        
+        scroll_layout.addWidget(att_card)
+        
+        # Marks section
+        marks_card = QWidget()
+        marks_card.setObjectName("card")
+        marks_layout = QVBoxLayout(marks_card)
+        
+        marks_header = QLabel("Subject-wise Marks")
+        marks_header.setStyleSheet("font-size: 18px; font-weight: bold; color: #212529; margin-bottom: 15px;")
+        marks_layout.addWidget(marks_header)
+        
+        marks_df = get_student_internal_marks(prn)
+        
+        if marks_df.empty:
+            no_marks = QLabel("No marks records found.")
+            no_marks.setStyleSheet("color: #6C757D;")
+            marks_layout.addWidget(no_marks)
+        else:
+            # Show marks grouped by subject
+            if "Subject" in marks_df.columns:
+                cols = ["Subject", "Semester", "CA1", "CA2", "MidSem", "SemesterExam", "Total", "MaxTotal"]
+                available_cols = [c for c in cols if c in marks_df.columns]
+                marks_display = marks_df[available_cols].copy()
+            else:
+                marks_display = marks_df.copy()
+            
+            marks_table = self._df_to_table(marks_display, editable=False)
+            marks_table.setStyleSheet(
+                "QTableView { border: none; alternate-background-color: #F1F3F5; }"
+                "QHeaderView::section { background-color: #20C997; color: white; padding: 6px; }"
+            )
+            marks_layout.addWidget(marks_table)
+        
+        scroll_layout.addWidget(marks_card)
+        
+        scroll_area.setWidget(scroll_content)
+        self.content.addWidget(scroll_area)
+
     def show_internal_marks(self):
         self.clear_content()
         import data_manager as dm
+        
+        # If student, redirect to analytics dashboard
+        if not self.is_admin and not self.is_teacher and self.current_user:
+            self.show_student_analytics(self.current_user.get("PRN", ""))
+            return
+
+        # Teacher/Admin Editor UI
         # Create a scroll area for the content
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
@@ -1498,44 +2407,16 @@ class MainWindow(QMainWindow):
         scroll_layout.setContentsMargins(20, 20, 20, 20)
         scroll_layout.setSpacing(20)
 
-        header = QLabel("Academic Records")
+        header = QLabel("Academic Records (Teacher Portal)")
         header.setStyleSheet("font-size: 28px; font-weight: bold; color: #212529; margin-bottom: 10px;")
         scroll_layout.addWidget(header)
 
-        # If student, show read-only table of their marks grouped by semester
-        if not self.is_admin and self.current_user:
-            viewer_card = QWidget()
-            viewer_card.setObjectName("card")
-            vlayout = QVBoxLayout(viewer_card)
-            vheader = QLabel("My Academic Records (Semester-wise)")
-            vheader.setStyleSheet("font-size: 18px; font-weight: bold; color: #212529; margin-bottom: 15px;")
-            vlayout.addWidget(vheader)
-
-            prn = self.current_user.get("PRN", "")
-            df = get_student_internal_marks(prn)
-            if df.empty:
-                lbl = QLabel("No internal marks available yet.")
-                lbl.setStyleSheet("color: #6C757D;")
-                vlayout.addWidget(lbl)
-            else:
-                # Ensure column order
-                cols = ["Semester", "Year", "Branch", "CA1", "CA2", "MidSem", "SemesterExam", "Obtained", "MaxTotal", "Total", "UpdatedAt"]
-                for c in cols:
-                    if c not in df.columns:
-                        df[c] = ""
-                df = df[["Semester", "Year", "Branch", "CA1", "CA2", "MidSem", "SemesterExam", "Obtained", "MaxTotal", "Total", "UpdatedAt"]]
-                tbl = self._df_to_table(df, editable=False)
-                vlayout.addWidget(tbl)
-
-            scroll_layout.addWidget(viewer_card)
-            scroll_area.setWidget(scroll_content)
-            self.content.addWidget(scroll_area)
-            return
-
-        # Admin editor UI
+        # Filter Card
         filter_card = QWidget()
         filter_card.setObjectName("card")
+        filter_card.setStyleSheet("#card { background: white; border-radius: 8px; border: 1px solid #dee2e6; padding: 15px; }")
         filter_layout = QVBoxLayout(filter_card)
+        
         filter_header = QLabel("Select Branch and Semester")
         filter_header.setStyleSheet("font-size: 16px; font-weight: bold; color: #212529; margin-bottom: 15px;")
         filter_layout.addWidget(filter_header)
@@ -1543,117 +2424,353 @@ class MainWindow(QMainWindow):
         row = QWidget()
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(0, 0, 0, 0)
-        row_layout.setSpacing(10)
+        row_layout.setSpacing(15)
 
-        # Removed year dropdown as requested
-        branch_box = QComboBox(); branch_box.addItems(["Computer", "IT", "AI/ML", "Mechanical", "Civil", "ENTC"])
-        sem_box = QComboBox(); sem_box.addItems([f"Sem {i}" for i in range(1, 9)])
+        branch_box = QComboBox()
+        branch_box.addItems(["Computer", "IT", "AI/ML", "Mechanical", "Civil", "ENTC"])
+        branch_box.setFixedWidth(200)
+        
+        sem_box = QComboBox()
+        sem_box.addItems([f"Sem {i}" for i in range(1, 9)])
+        sem_box.setFixedWidth(150)
 
-        row_layout.addWidget(QLabel("Branch:")); row_layout.addWidget(branch_box)
-        row_layout.addWidget(QLabel("Semester:")); row_layout.addWidget(sem_box)
+        row_layout.addWidget(QLabel("Branch:"))
+        row_layout.addWidget(branch_box)
+        row_layout.addWidget(QLabel("Semester:"))
+        row_layout.addWidget(sem_box)
+        row_layout.addStretch()
 
         filter_layout.addWidget(row)
-
-        table_holder = QWidget(); table_layout = QVBoxLayout(table_holder); table_layout.setContentsMargins(0, 10, 0, 0)
-        filter_layout.addWidget(table_holder)
-
-        # Buttons
-        btn_row = QWidget(); btn_layout = QHBoxLayout(btn_row); btn_layout.addStretch()
-        save_btn = QPushButton("Save Marks"); save_btn.setObjectName("primary"); save_btn.setFixedWidth(140)
-        btn_layout.addWidget(save_btn)
-        filter_layout.addWidget(btn_row)
-
         scroll_layout.addWidget(filter_card)
+
+        # Table Container
+        table_container = QWidget()
+        table_layout = QVBoxLayout(table_container)
+        table_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.addWidget(table_container)
+
+        # Save Button Container
+        btn_row = QWidget()
+        btn_layout = QHBoxLayout(btn_row)
+        btn_layout.setContentsMargins(0, 0, 0, 0)
+        btn_layout.addStretch()
+        
+        save_btn = QPushButton("Save Marks")
+        save_btn.setObjectName("primary")
+        save_btn.setFixedWidth(150)
+        save_btn.setStyleSheet("background-color: #4361EE; color: white; border-radius: 6px; padding: 8px 16px; font-weight: bold;")
+        
+        btn_layout.addWidget(save_btn)
+        scroll_layout.addWidget(btn_row)
+
         scroll_area.setWidget(scroll_content)
         self.content.addWidget(scroll_area)
 
         def load_students_and_marks():
-            branch = branch_box.currentText(); sem = sem_box.currentText()
-            students_df = list_all_students()
-            if students_df.empty:
-                df = pd.DataFrame(columns=["PRN", "Name", "CA1", "CA2", "MidSem", "SemesterExam", "Obtained", "MaxTotal", "Total"])
-            else:
-                # Filter only by branch since year dropdown was removed
-                filtered = students_df[students_df["Branch"] == branch].copy()
-                filtered = filtered[["PRN", "FullName", "Year"]].rename(columns={"FullName": "Name"})
-                # Get all years for this branch and semester
-                existing = get_internal_marks("", branch, sem)  # Empty string for year to get all years
-                df = filtered
-                if not existing.empty:
-                    df = df.merge(existing[["PRN", "CA1", "CA2", "MidSem", "SemesterExam", "Obtained", "MaxTotal", "Total"]], on="PRN", how="left")
-                # Ensure numeric columns present
-                for c in ["CA1", "CA2", "MidSem", "SemesterExam", "Obtained", "MaxTotal", "Total"]:
-                    if c not in df.columns:
-                        df[c] = ""
-
-            # Reorder columns
-            df = df[["PRN", "Name", "CA1", "CA2", "MidSem", "SemesterExam", "Obtained", "MaxTotal", "Total"]]
-            table = self._df_to_table(df, editable=True)
-            # Lock PRN and Name columns from editing
-            for r in range(table.rowCount()):
-                for c in [0, 1]:
-                    itm = table.item(r, c)
-                    if itm:
-                        itm.setFlags(itm.flags() & ~Qt.ItemIsEditable)
-
-            # Replace holder
+            branch = branch_box.currentText()
+            sem = sem_box.currentText()
+            
+            # Clear previous table
             while table_layout.count():
                 item = table_layout.takeAt(0)
                 w = item.widget()
-                if w:
-                    w.deleteLater()
+                if w: w.deleteLater()
+
+            students_df = list_all_students()
+            if students_df.empty:
+                lbl = QLabel("No students found.")
+                table_layout.addWidget(lbl)
+                return None
+
+            # Filter by branch
+            filtered = students_df[students_df["Branch"] == branch].copy()
+            if filtered.empty:
+                lbl = QLabel(f"No students found for {branch}.")
+                table_layout.addWidget(lbl)
+                return None
+
+            filtered = filtered[["PRN", "FullName", "Year"]].rename(columns={"FullName": "Name"})
+            
+            # Get existing marks
+            existing = get_internal_marks("", branch, sem)
+            
+            df = filtered
+            if not existing.empty:
+                # Merge existing marks
+                df = df.merge(existing[["PRN", "CA1", "CA2", "MidSem", "SemesterExam", "Obtained", "MaxTotal", "Total", "Percentage"]], on="PRN", how="left")
+            
+            # Initialize missing columns
+            for c in ["CA1", "CA2", "MidSem", "SemesterExam", "Obtained", "MaxTotal", "Total", "Percentage"]:
+                if c not in df.columns:
+                    df[c] = ""
+
+            # Reorder columns for display
+            df = df[["PRN", "Name", "CA1", "CA2", "MidSem", "SemesterExam", "Obtained", "MaxTotal", "Total", "Percentage"]]
+            
+            # Create table
+            table = self._df_to_table(df, editable=True)
+            
+            # Set Headers with Max Marks info
+            headers = ["PRN", "Name", "CA1 (10)", "CA2 (10)", "MidSem (20)", "SemExam (60)", "Obtained", "MaxTotal", "Total", "Percentage"]
+            table.setHorizontalHeaderLabels(headers)
+            
+            # Lock PRN, Name, Obtained, Total, Percentage columns
+            for r in range(table.rowCount()):
+                for c in [0, 1, 6, 8, 9]: # Locked columns
+                    itm = table.item(r, c)
+                    if itm:
+                        itm.setFlags(itm.flags() & ~Qt.ItemIsEditable)
+                        if c in [6, 8, 9]: # Gray out calculated fields
+                            itm.setBackground(QColor("#e9ecef"))
+
             table_layout.addWidget(table)
             return table
 
-        marks_table = load_students_and_marks()
-        # Removed year_box reference as requested
-        branch_box.currentIndexChanged.connect(lambda: load_students_and_marks())
-        sem_box.currentIndexChanged.connect(lambda: load_students_and_marks())
+        self.marks_table_widget = load_students_and_marks()
+
+        branch_box.currentIndexChanged.connect(lambda: setattr(self, 'marks_table_widget', load_students_and_marks()))
+        sem_box.currentIndexChanged.connect(lambda: setattr(self, 'marks_table_widget', load_students_and_marks()))
 
         def on_save():
-            tbl = marks_table
-            # If table was reloaded, get latest widget
-            if table_layout.count():
-                w = table_layout.itemAt(0).widget()
-                if w:
-                    tbl = w
+            if not hasattr(self, 'marks_table_widget') or not self.marks_table_widget:
+                return
+            
+            tbl = self.marks_table_widget
             df = self._table_to_df(tbl)
-            # Validate and compute totals
+            
+            # Helper to safely convert to int
             def to_int(x):
                 try:
                     return max(0, int(float(str(x).strip() or "0")))
                 except Exception:
                     return 0
-            df["CA1"] = df["CA1"].map(to_int).clip(upper=10)
-            df["CA2"] = df["CA2"].map(to_int).clip(upper=10)
-            df["MidSem"] = df["MidSem"].map(to_int).clip(upper=20)
-            df["SemesterExam"] = df["SemesterExam"].map(to_int)
-            df["MaxTotal"] = df["MaxTotal"].map(to_int)
-            df.loc[df["MaxTotal"] <= 0, "MaxTotal"] = 100
-            df["Obtained"] = (df["CA1"].astype(int) + df["CA2"].astype(int) + df["MidSem"].astype(int) + df["SemesterExam"].astype(int))
-            df.loc[df["Obtained"] > df["MaxTotal"], "Obtained"] = df["MaxTotal"]
-            df["Total"] = df["Obtained"].astype(int)
 
-            # Attach meta columns - use existing Year from student record
-            # Year column is already included from the filtered dataframe
+            # Process and Validate
+            df["CA1"] = df["CA1 (10)"].map(to_int).clip(upper=10)
+            df["CA2"] = df["CA2 (10)"].map(to_int).clip(upper=10)
+            df["MidSem"] = df["MidSem (20)"].map(to_int).clip(upper=20)
+            df["SemesterExam"] = df["SemExam (60)"].map(to_int).clip(upper=60)
+            
+            # Calculate fields
+            df["Obtained"] = df["CA1"] + df["CA2"] + df["MidSem"] + df["SemesterExam"]
+            df["MaxTotal"] = 100
+            df["Total"] = df["Obtained"]
+            
+            # Add metadata
             df["Branch"] = branch_box.currentText()
             df["Semester"] = sem_box.currentText()
-
-            # Reorder for API
+            
+            # Prepare for upsert
             cols = ["PRN", "Name", "Branch", "Semester", "CA1", "CA2", "MidSem", "SemesterExam", "Obtained", "MaxTotal", "Total"]
-            df = df[cols]
+            final_df = df[cols]
+            
             try:
-                upsert_internal_marks(df)
-                QMessageBox.information(self, "Saved", "Academic records saved successfully.")
+                upsert_internal_marks(final_df)
+                QMessageBox.information(self, "Saved", "Marks saved and calculated successfully!")
+                # Reload to show calculated values
+                self.marks_table_widget = load_students_and_marks()
             except Exception as e:
-                QMessageBox.warning(self, "Error", f"Failed to save marks: {e}")
+                QMessageBox.warning(self, "Error", f"Failed to save: {e}")
 
         save_btn.clicked.connect(on_save)
 
+    def show_student_analytics(self, prn: str):
+        self.clear_content()
+        import data_manager as dm
+        
+        # Create scroll area
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet("QScrollArea { border: none; background-color: #F8F9FA; }")
+        
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(30, 30, 30, 30)
+        scroll_layout.setSpacing(25)
+        
+        # Header Section
+        header_row = QHBoxLayout()
+        title_col = QVBoxLayout()
+        
+        title = QLabel("Academic Performance Report")
+        title.setStyleSheet("font-size: 32px; font-weight: bold; color: #212529;")
+        
+        subtitle = QLabel(f"Performance Analytics for PRN: {prn}")
+        subtitle.setStyleSheet("font-size: 16px; color: #6C757D;")
+        
+        title_col.addWidget(title)
+        title_col.addWidget(subtitle)
+        header_row.addLayout(title_col)
+        header_row.addStretch()
+        
+        # Add Logo if available
+        logo = LogoWidget(size=60)
+        header_row.addWidget(logo)
+        
+        scroll_layout.addLayout(header_row)
+        
+        # Get Data
+        marks_df = get_student_internal_marks(prn)
+        
+        if marks_df.empty:
+            no_data = QLabel("No academic records found for analysis.")
+            no_data.setStyleSheet("font-size: 18px; color: #6C757D; padding: 40px;")
+            no_data.setAlignment(Qt.AlignCenter)
+            scroll_layout.addWidget(no_data)
+            scroll_area.setWidget(scroll_content)
+            self.content.addWidget(scroll_area)
+            return
+
+        # Calculate Stats
+        try:
+            marks_df["Obtained"] = pd.to_numeric(marks_df["Obtained"], errors='coerce').fillna(0)
+            marks_df["MaxTotal"] = pd.to_numeric(marks_df["MaxTotal"], errors='coerce').fillna(100)
+            marks_df["Percentage"] = (marks_df["Obtained"] / marks_df["MaxTotal"] * 100).round(2)
+            
+            avg_score = marks_df["Percentage"].mean()
+            total_subjects = len(marks_df)
+            best_subject = marks_df.loc[marks_df["Percentage"].idxmax()]["Semester"] if not marks_df.empty else "N/A" # Using Semester as Subject placeholder if Subject col missing
+            # If we had a Subject column it would be better, but we use Semester/Branch combo or assume rows are subjects
+        except Exception:
+            avg_score = 0
+            total_subjects = 0
+            best_subject = "N/A"
+
+        # KPI Cards Row
+        kpi_layout = QHBoxLayout()
+        kpi_layout.setSpacing(20)
+        
+        def create_kpi_card(title, value, color_code):
+            card = QWidget()
+            card.setObjectName("kpi")
+            card.setStyleSheet(f"#kpi {{ background: white; border-radius: 12px; border-left: 5px solid {color_code}; border: 1px solid #e9ecef; }}")
+            cl = QVBoxLayout(card)
+            cl.setContentsMargins(20, 20, 20, 20)
+            
+            lbl_val = QLabel(str(value))
+            lbl_val.setStyleSheet(f"font-size: 28px; font-weight: bold; color: {color_code};")
+            
+            lbl_title = QLabel(title)
+            lbl_title.setStyleSheet("font-size: 14px; color: #6C757D; font-weight: 600;")
+            
+            cl.addWidget(lbl_val)
+            cl.addWidget(lbl_title)
+            return card
+
+        kpi_layout.addWidget(create_kpi_card("Average Score", f"{avg_score:.1f}%", "#4361EE"))
+        kpi_layout.addWidget(create_kpi_card("Total Subjects", str(total_subjects), "#20C997"))
+        kpi_layout.addWidget(create_kpi_card("Best Performance", str(best_subject), "#F72585"))
+        
+        scroll_layout.addLayout(kpi_layout)
+
+        # Charts Section
+        charts_row = QHBoxLayout()
+        charts_row.setSpacing(20)
+        
+        # Matplotlib Charts
+        try:
+            from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+            from matplotlib.figure import Figure
+            import matplotlib.pyplot as plt
+            
+            # 1. Bar Chart: Performance by Semester/Subject
+            bar_card = QWidget()
+            bar_card.setStyleSheet("background: white; border-radius: 12px; border: 1px solid #e9ecef;")
+            bar_layout = QVBoxLayout(bar_card)
+            
+            fig_bar = Figure(figsize=(5, 4), dpi=100)
+            canvas_bar = FigureCanvas(fig_bar)
+            ax_bar = fig_bar.add_subplot(111)
+            
+            # Prepare data
+            # Assuming 'Semester' acts as differentiator if 'Subject' is missing, or we just plot rows
+            x_labels = marks_df["Semester"].tolist() # Or Subject if available
+            y_values = marks_df["Percentage"].tolist()
+            
+            bars = ax_bar.bar(range(len(y_values)), y_values, color='#4cc9f0', width=0.5)
+            ax_bar.set_xticks(range(len(x_labels)))
+            ax_bar.set_xticklabels(x_labels, rotation=45)
+            ax_bar.set_title("Performance Trend")
+            ax_bar.set_ylabel("Percentage (%)")
+            ax_bar.set_ylim(0, 100)
+            
+            # Add value labels
+            for bar in bars:
+                height = bar.get_height()
+                ax_bar.text(bar.get_x() + bar.get_width()/2., height,
+                        f'{height:.1f}%',
+                        ha='center', va='bottom', fontsize=8)
+            
+            fig_bar.tight_layout()
+            bar_layout.addWidget(canvas_bar)
+            charts_row.addWidget(bar_card, 2) # Flex 2
+            
+            # 2. Pie Chart: Pass/Fail or Grade Distribution (Simulated)
+            pie_card = QWidget()
+            pie_card.setStyleSheet("background: white; border-radius: 12px; border: 1px solid #e9ecef;")
+            pie_layout = QVBoxLayout(pie_card)
+            
+            fig_pie = Figure(figsize=(4, 4), dpi=100)
+            canvas_pie = FigureCanvas(fig_pie)
+            ax_pie = fig_pie.add_subplot(111)
+            
+            # Simple distribution: >75 (Distinction), 60-75 (First Class), <60 (Second Class)
+            distinction = len(marks_df[marks_df["Percentage"] >= 75])
+            first_class = len(marks_df[(marks_df["Percentage"] >= 60) & (marks_df["Percentage"] < 75)])
+            second_class = len(marks_df[marks_df["Percentage"] < 60])
+            
+            sizes = [distinction, first_class, second_class]
+            labels = ['Distinction', 'First Class', 'Second Class']
+            colors = ['#4361EE', '#4CC9F0', '#F72585']
+            
+            # Filter zero values
+            pie_data = [(s, l, c) for s, l, c in zip(sizes, labels, colors) if s > 0]
+            if pie_data:
+                s, l, c = zip(*pie_data)
+                ax_pie.pie(s, labels=l, colors=c, autopct='%1.1f%%', startangle=90)
+                ax_pie.set_title("Grade Distribution")
+            else:
+                ax_pie.text(0.5, 0.5, "No Data", ha='center')
+            
+            fig_pie.tight_layout()
+            pie_layout.addWidget(canvas_pie)
+            charts_row.addWidget(pie_card, 1) # Flex 1
+            
+        except ImportError:
+            err_lbl = QLabel("Matplotlib not installed. Charts cannot be displayed.")
+            charts_row.addWidget(err_lbl)
+        except Exception as e:
+            err_lbl = QLabel(f"Error generating charts: {e}")
+            charts_row.addWidget(err_lbl)
+            
+        scroll_layout.addLayout(charts_row)
+
+        # Detailed Table Section
+        table_card = QWidget()
+        table_card.setStyleSheet("background: white; border-radius: 12px; border: 1px solid #e9ecef;")
+        table_layout = QVBoxLayout(table_card)
+        
+        tbl_header = QLabel("Detailed Marks Record")
+        tbl_header.setStyleSheet("font-size: 18px; font-weight: bold; color: #212529; margin-bottom: 10px;")
+        table_layout.addWidget(tbl_header)
+        
+        # Display table
+        display_df = marks_df[["Semester", "CA1", "CA2", "MidSem", "SemesterExam", "Obtained", "MaxTotal", "Percentage"]]
+        display_df.columns = ["Semester", "CA1 (10)", "CA2 (10)", "MidSem (20)", "SemExam (60)", "Obtained", "Max", "%"]
+        
+        tbl = self._df_to_table(display_df, editable=False)
+        tbl.setStyleSheet("QHeaderView::section { background-color: #4361EE; color: white; }")
+        table_layout.addWidget(tbl)
+        
+        scroll_layout.addWidget(table_card)
+
+        scroll_area.setWidget(scroll_content)
+        self.content.addWidget(scroll_area)
+
     def show_add_student(self):
-        # Admin-only: show signup form prefilled for admin to add student
-        if not self.is_admin:
-            QMessageBox.warning(self, "Access Denied", "Only admins can add students.")
+        # Teachers and admins can add students
+        if not self.is_teacher and not self.is_admin:
+            QMessageBox.warning(self, "Access Denied", "Only teachers and admins can add students.")
             return
 
         self.clear_content()
@@ -1671,7 +2788,8 @@ class MainWindow(QMainWindow):
             self.show_dashboard()
 
         # Make sure all fields are editable for admin
-        signup = StudentSignup(on_submit=on_submit, on_back=on_back)
+        # StudentSignup expects (on_submit, on_back_to_main, on_back_to_login)
+        signup = StudentSignup(on_submit=on_submit, on_back_to_main=on_back, on_back_to_login=None)
         # Enable all input fields to be editable
         for field in [signup.student_id, signup.full_name, signup.email, signup.roll_no, 
                      signup.prn, signup.student_phone, signup.parent_phone, signup.address, 
@@ -1700,9 +2818,9 @@ class MainWindow(QMainWindow):
         self.content.addWidget(container)
 
     def show_remove_student(self):
-        # Admin-only: prompt for PRN and remove student after confirmation
-        if not self.is_admin:
-            QMessageBox.warning(self, "Access Denied", "Only admins can remove students.")
+        # Teachers and admins can remove students
+        if not self.is_teacher and not self.is_admin:
+            QMessageBox.warning(self, "Access Denied", "Only teachers and admins can remove students.")
             return
 
         # Ask for PRN
@@ -2032,6 +3150,7 @@ class MainWindow(QMainWindow):
     def logout(self):
         self.current_user = None
         self.is_admin = False
+        self.is_teacher = False  # Reset teacher flag
         # Hide assistant
         if hasattr(self, 'assistant') and self.assistant:
             self.assistant.hide()

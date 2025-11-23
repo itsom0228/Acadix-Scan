@@ -234,7 +234,7 @@ class SplashScreen(QWidget):
 
 
 class RoleSelection(QWidget):
-    def __init__(self, on_student: Callable[[], None], on_admin: Callable[[], None]):
+    def __init__(self, on_student: Callable[[], None], on_teacher: Callable[[], None], on_admin: Callable[[], None]):
         super().__init__()
         
         # Set background color
@@ -352,6 +352,79 @@ class RoleSelection(QWidget):
         student_layout.addStretch()
         student_layout.addWidget(student_btn)
         
+        # Teacher card (middle)
+        teacher_card = QWidget()
+        teacher_card.setObjectName("card")
+        teacher_card.setCursor(Qt.PointingHandCursor)
+        teacher_card.setFixedSize(280, 320)
+        teacher_card.setStyleSheet("""
+            QWidget#card {
+                background-color: white;
+                border-radius: 16px;
+                border: 1px solid #e9ecef;
+            }
+            QWidget#card:hover {
+                border: 1px solid #20c997;
+                background-color: #f8f9fa;
+            }
+        """)
+
+        teacher_shadow = QGraphicsDropShadowEffect()
+        teacher_shadow.setBlurRadius(20)
+        teacher_shadow.setColor(QColor(0, 0, 0, 40))
+        teacher_shadow.setOffset(0, 4)
+        teacher_card.setGraphicsEffect(teacher_shadow)
+
+        teacher_layout = QVBoxLayout(teacher_card)
+        teacher_layout.setAlignment(Qt.AlignCenter)
+        teacher_layout.setContentsMargins(20, 30, 20, 30)
+        teacher_layout.setSpacing(15)
+
+        teacher_icon_container = QWidget()
+        teacher_icon_container.setFixedSize(80, 80)
+        teacher_icon_container.setStyleSheet("""
+            background-color: rgba(67, 97, 238, 0.08);
+            border-radius: 40px;
+        """)
+        teacher_icon_layout = QVBoxLayout(teacher_icon_container)
+        teacher_icon_layout.setContentsMargins(0, 0, 0, 0)
+
+        teacher_icon = QLabel("👩‍🏫")
+        teacher_icon.setAlignment(Qt.AlignCenter)
+        teacher_icon.setStyleSheet("font-size: 36px; margin-bottom: 0px;")
+        teacher_icon_layout.addWidget(teacher_icon)
+
+        teacher_title = QLabel("Teacher / Faculty")
+        teacher_title.setAlignment(Qt.AlignCenter)
+        teacher_title.setStyleSheet("font-size: 22px; font-weight: bold; color: #212529; margin-top: 5px;")
+
+        teacher_desc = QLabel("Sign up or login to manage classes\nand mark attendance")
+        teacher_desc.setAlignment(Qt.AlignCenter)
+        teacher_desc.setStyleSheet("font-size: 14px; color: #6C757D; margin: 10px 0; line-height: 1.4;")
+
+        teacher_btn = QPushButton("Continue as Teacher")
+        teacher_btn.setObjectName("primary")
+        teacher_btn.setCursor(Qt.PointingHandCursor)
+        teacher_btn.setStyleSheet("""
+            QPushButton#primary {
+                background-color: #20c997;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 12px 20px;
+                font-weight: 600;
+                font-size: 14px;
+            }
+            QPushButton#primary:hover { background-color: #1ba37e; }
+        """)
+        teacher_btn.clicked.connect(on_teacher)
+
+        teacher_layout.addWidget(teacher_icon_container, 0, Qt.AlignCenter)
+        teacher_layout.addWidget(teacher_title)
+        teacher_layout.addWidget(teacher_desc)
+        teacher_layout.addStretch()
+        teacher_layout.addWidget(teacher_btn)
+
         # Admin card with shadow effect
         admin_card = QWidget()
         admin_card.setObjectName("card")
@@ -432,20 +505,30 @@ class RoleSelection(QWidget):
         admin_layout.addStretch()
         admin_layout.addWidget(admin_btn)
         
-        # Add cards to layout
+        # Add cards to layout (student, teacher, admin) - centered
         cards_layout.addWidget(student_card)
+        cards_layout.addWidget(teacher_card)
         cards_layout.addWidget(admin_card)
+        cards_layout.setAlignment(Qt.AlignCenter)
+        
+        # Wrapper for cards to ensure proper centering
+        cards_container = QWidget()
+        cards_wrapper = QVBoxLayout(cards_container)
+        cards_wrapper.addLayout(cards_layout)
+        cards_wrapper.setAlignment(cards_layout, Qt.AlignCenter)
+        cards_wrapper.setContentsMargins(0, 0, 0, 0)
         
         # Add all elements to main layout
         main_layout.addWidget(header)
         main_layout.addWidget(subtitle)
-        main_layout.addLayout(cards_layout)
+        main_layout.addWidget(cards_container)
+        main_layout.addStretch()
         
         self.setLayout(main_layout)
 
 
 class StudentLogin(QWidget):
-    def __init__(self, on_login: Callable[[str, str], None], on_signup: Callable[[], None], on_forgot: Callable[[str], None]):
+    def __init__(self, on_login: Callable[[str, str], None], on_signup: Callable[[], None], on_forgot: Callable[[str], None], on_back: Callable[[], None] = None):
         super().__init__()
         
         # Main container with centered content
@@ -571,6 +654,23 @@ class StudentLogin(QWidget):
         signup_layout.addWidget(signup_label)
         signup_layout.addWidget(btn_signup)
         
+        # Back to main button
+        back_container = QWidget()
+        back_layout = QHBoxLayout(back_container)
+        back_layout.setContentsMargins(0, 10, 0, 0)
+        back_layout.setAlignment(Qt.AlignLeft)
+        
+        if on_back:
+            btn_back = QPushButton("← Back to Main")
+            btn_back.setStyleSheet(
+                "background: transparent; color: #6C757D; border: none; "
+                "font-size: 13px; padding: 5px; text-align: left;"
+            )
+            btn_back.setCursor(Qt.PointingHandCursor)
+            btn_back.clicked.connect(on_back)
+            back_layout.addWidget(btn_back)
+            back_layout.addStretch()
+        
         # Add all elements to card layout
         card_layout.addWidget(header)
         card_layout.addWidget(subtitle)
@@ -580,6 +680,8 @@ class StudentLogin(QWidget):
         card_layout.addWidget(forgot_container)
         card_layout.addWidget(divider)
         card_layout.addWidget(signup_container)
+        if on_back:
+            card_layout.addWidget(back_container)
         
         # Add card to main layout
         main_layout.addWidget(login_card)
@@ -596,7 +698,7 @@ class StudentLogin(QWidget):
 
 
 class AdminLogin(QWidget):
-    def __init__(self, on_login: Callable[[str, str], None]):
+    def __init__(self, on_login: Callable[[str, str], None], on_back: Callable[[], None] = None):
         super().__init__()
         
         # Main container with centered content
@@ -678,12 +780,31 @@ class AdminLogin(QWidget):
         btn_login.setObjectName("primary")
         btn_login.clicked.connect(lambda: on_login(self.username_edit.text(), self.pwd_edit.text()))
         
+        # Back to main button
+        back_container = QWidget()
+        back_layout = QHBoxLayout(back_container)
+        back_layout.setContentsMargins(0, 10, 0, 0)
+        back_layout.setAlignment(Qt.AlignLeft)
+        
+        if on_back:
+            btn_back = QPushButton("← Back to Main")
+            btn_back.setStyleSheet(
+                "background: transparent; color: #6C757D; border: none; "
+                "font-size: 13px; padding: 5px; text-align: left;"
+            )
+            btn_back.setCursor(Qt.PointingHandCursor)
+            btn_back.clicked.connect(on_back)
+            back_layout.addWidget(btn_back)
+            back_layout.addStretch()
+        
         # Add all elements to card layout
         card_layout.addWidget(header)
         card_layout.addWidget(subtitle)
         card_layout.addWidget(username_container)
         card_layout.addWidget(pwd_container)
         card_layout.addWidget(btn_login)
+        if on_back:
+            card_layout.addWidget(back_container)
         
         # Add card to main layout
         main_layout.addWidget(login_card)
@@ -700,7 +821,7 @@ class AdminLogin(QWidget):
 
 
 class StudentSignup(QWidget):
-    def __init__(self, on_submit: Callable[[dict], None], on_back: Callable[[], None] = None):
+    def __init__(self, on_submit: Callable[[dict], None], on_back_to_main: Callable[[], None] = None, on_back_to_login: Callable[[], None] = None):
         super().__init__()
         
         # Main container with centered content
@@ -979,33 +1100,50 @@ class StudentSignup(QWidget):
         }))
         
         # Back to login button (if provided)
-        if on_back:
+        if on_back_to_login:
             # Divider
             divider = QWidget()
             divider.setFixedHeight(1)
             divider.setStyleSheet("background-color: #DEE2E6; margin: 15px 0;")
-            
+
             back_container = QWidget()
             back_layout = QHBoxLayout(back_container)
             back_layout.setContentsMargins(0, 10, 0, 0)
             back_layout.setAlignment(Qt.AlignCenter)
-            
+
             back_label = QLabel("Already have an account?")
             back_label.setStyleSheet("color: #6C757D; font-size: 14px;")
-            
+
             btn_back = QPushButton("Back to Login")
             btn_back.setStyleSheet(
                 "background: transparent; color: #4361EE; border: none; "
                 "text-decoration: underline; font-size: 14px; font-weight: bold; padding: 5px;"
             )
             btn_back.setCursor(Qt.PointingHandCursor)
-            btn_back.clicked.connect(on_back)
-            
+            btn_back.clicked.connect(on_back_to_login)
+
             back_layout.addWidget(back_label)
             back_layout.addWidget(btn_back)
-            
             card_layout.addWidget(divider)
             card_layout.addWidget(back_container)
+        
+        # Back to main page button
+        main_back_container = QWidget()
+        main_back_layout = QHBoxLayout(main_back_container)
+        main_back_layout.setContentsMargins(0, 10, 0, 0)
+        main_back_layout.setAlignment(Qt.AlignLeft)
+        
+        if on_back_to_main:
+            btn_main_back = QPushButton("← Back to Main")
+            btn_main_back.setStyleSheet(
+                "background: transparent; color: #6C757D; border: none; "
+                "font-size: 13px; padding: 5px; text-align: left;"
+            )
+            btn_main_back.setCursor(Qt.PointingHandCursor)
+            btn_main_back.clicked.connect(on_back_to_main)
+            main_back_layout.addWidget(btn_main_back)
+            main_back_layout.addStretch()
+            card_layout.addWidget(main_back_container)
         
         # Add all elements to card layout
         card_layout.addWidget(header)
@@ -1046,8 +1184,173 @@ class StudentSignup(QWidget):
             self.confirm_toggle.setText("👁")  # Eye
 
 
+class TeacherSignup(QWidget):
+    def __init__(self, on_submit: Callable[[dict], None], on_back_to_login: Callable[[], None] = None, on_back_to_main: Callable[[], None] = None):
+        super().__init__()
+        main_layout = QVBoxLayout()
+        main_layout.setAlignment(Qt.AlignCenter)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+
+        signup_card = QWidget()
+        signup_card.setObjectName("card")
+        signup_card.setFixedWidth(500)
+        card_layout = QVBoxLayout(signup_card)
+        card_layout.setContentsMargins(30, 40, 30, 40)
+        card_layout.setSpacing(15)
+
+        header = QLabel("Teacher / Faculty Signup")
+        header.setAlignment(Qt.AlignCenter)
+        header.setStyleSheet("font-size: 24px; font-weight: bold; color: #212529; margin-bottom: 10px;")
+
+        subtitle = QLabel("Register your faculty account — admin approval required")
+        subtitle.setAlignment(Qt.AlignCenter)
+        subtitle.setStyleSheet("font-size: 14px; color: #6C757D; margin-bottom: 20px;")
+
+        # TeacherID
+        id_container = QWidget()
+        id_layout = QHBoxLayout(id_container)
+        id_layout.setContentsMargins(0,0,0,0)
+        tid_icon = QLabel("🆔")
+        tid_icon.setStyleSheet("font-size: 16px;")
+        self.teacher_id = QLineEdit()
+        self.teacher_id.setPlaceholderText("Teacher ID")
+        id_layout.addWidget(tid_icon); id_layout.addWidget(self.teacher_id)
+
+        # Full name
+        name_container = QWidget(); name_layout = QHBoxLayout(name_container)
+        name_layout.setContentsMargins(0,0,0,0)
+        name_icon = QLabel("👤"); name_icon.setStyleSheet("font-size:16px;")
+        self.teacher_name = QLineEdit(); self.teacher_name.setPlaceholderText("Full Name")
+        name_layout.addWidget(name_icon); name_layout.addWidget(self.teacher_name)
+
+        # Email
+        email_container = QWidget(); email_layout = QHBoxLayout(email_container)
+        email_icon = QLabel("✉️"); email_icon.setStyleSheet("font-size:16px;")
+        self.teacher_email = QLineEdit(); self.teacher_email.setPlaceholderText("Email")
+        email_layout.addWidget(email_icon); email_layout.addWidget(self.teacher_email)
+
+        # Phone & Department
+        pd_container = QWidget(); pd_layout = QHBoxLayout(pd_container)
+        phone_icon = QLabel("📱"); phone_icon.setStyleSheet("font-size:16px;")
+        self.teacher_phone = QLineEdit(); self.teacher_phone.setPlaceholderText("Phone")
+        dept_icon = QLabel("🏢"); dept_icon.setStyleSheet("font-size:16px;")
+        self.teacher_dept = QLineEdit(); self.teacher_dept.setPlaceholderText("Department")
+        pd_layout.addWidget(phone_icon); pd_layout.addWidget(self.teacher_phone); pd_layout.addWidget(dept_icon); pd_layout.addWidget(self.teacher_dept)
+
+        # Designation
+        des_container = QWidget(); des_layout = QHBoxLayout(des_container)
+        des_icon = QLabel("💼"); des_icon.setStyleSheet("font-size:16px;")
+        self.teacher_desig = QLineEdit(); self.teacher_desig.setPlaceholderText("Designation (e.g., Lecturer)")
+        des_layout.addWidget(des_icon); des_layout.addWidget(self.teacher_desig)
+
+        # Password
+        pwd_container = QWidget(); pwd_layout = QHBoxLayout(pwd_container)
+        pwd_icon = QLabel("🔒"); pwd_icon.setStyleSheet("font-size:16px;")
+        self.teacher_password = QLineEdit(); self.teacher_password.setPlaceholderText("Password"); self.teacher_password.setEchoMode(QLineEdit.Password)
+        pwd_layout.addWidget(pwd_icon); pwd_layout.addWidget(self.teacher_password)
+
+        # Confirm
+        c_container = QWidget(); c_layout = QHBoxLayout(c_container)
+        c_icon = QLabel("🔒"); c_icon.setStyleSheet("font-size:16px;")
+        self.teacher_confirm = QLineEdit(); self.teacher_confirm.setPlaceholderText("Confirm Password"); self.teacher_confirm.setEchoMode(QLineEdit.Password)
+        c_layout.addWidget(c_icon); c_layout.addWidget(self.teacher_confirm)
+
+        submit = QPushButton("Register (Wait for Admin Approval)")
+        submit.setObjectName("primary")
+        submit.clicked.connect(lambda: on_submit({
+            "TeacherID": self.teacher_id.text(),
+            "FullName": self.teacher_name.text(),
+            "Email": self.teacher_email.text(),
+            "Phone": self.teacher_phone.text(),
+            "Department": self.teacher_dept.text(),
+            "Designation": self.teacher_desig.text(),
+            "Password": self.teacher_password.text(),
+            "ConfirmPassword": self.teacher_confirm.text(),
+        }))
+
+        if on_back_to_login:
+            divider = QWidget(); divider.setFixedHeight(1); divider.setStyleSheet("background-color: #DEE2E6; margin: 15px 0;")
+            back_container = QWidget(); back_layout = QHBoxLayout(back_container); back_layout.setContentsMargins(0,10,0,0); back_layout.setAlignment(Qt.AlignCenter)
+            back_label = QLabel("Already have an account?"); back_label.setStyleSheet("color:#6C757D;font-size:14px;")
+            btn_back = QPushButton("Back to Login"); btn_back.setStyleSheet("background:transparent; color:#4361EE; border:none; text-decoration:underline;"); btn_back.clicked.connect(on_back_to_login)
+            back_layout.addWidget(back_label); back_layout.addWidget(btn_back)
+            card_layout.addWidget(divider); card_layout.addWidget(back_container)
+        
+        # Back to main button
+        main_back_container = QWidget(); main_back_layout = QHBoxLayout(main_back_container); main_back_layout.setContentsMargins(0, 10, 0, 0); main_back_layout.setAlignment(Qt.AlignLeft)
+        if on_back_to_main:
+            btn_main_back = QPushButton("← Back to Main"); btn_main_back.setStyleSheet("background: transparent; color: #6C757D; border: none; font-size: 13px; padding: 5px; text-align: left;"); btn_main_back.setCursor(Qt.PointingHandCursor); btn_main_back.clicked.connect(on_back_to_main)
+            main_back_layout.addWidget(btn_main_back); main_back_layout.addStretch()
+            card_layout.addWidget(main_back_container)
+
+        card_layout.addWidget(header); card_layout.addWidget(subtitle); card_layout.addWidget(id_container); card_layout.addWidget(name_container); card_layout.addWidget(email_container)
+        card_layout.addWidget(pd_container); card_layout.addWidget(des_container); card_layout.addWidget(pwd_container); card_layout.addWidget(c_container); card_layout.addWidget(submit)
+
+        main_layout.addWidget(signup_card)
+        self.setLayout(main_layout)
+
+
+class TeacherLogin(QWidget):
+    def __init__(self, on_login: Callable[[str, str], None], on_signup: Callable[[], None], on_back: Callable[[], None] = None):
+        super().__init__()
+        main_layout = QVBoxLayout(); main_layout.setAlignment(Qt.AlignCenter); main_layout.setContentsMargins(0,0,0,0)
+        login_card = QWidget(); login_card.setObjectName("card"); login_card.setFixedWidth(420)
+        card_layout = QVBoxLayout(login_card); card_layout.setContentsMargins(30,40,30,40); card_layout.setSpacing(15)
+        logo_widget = LogoWidget(size=80); card_layout.addWidget(logo_widget, 0, Qt.AlignCenter)
+        header = QLabel("Teacher Login"); header.setAlignment(Qt.AlignCenter); header.setStyleSheet("font-size:24px;font-weight:bold;color:#212529;margin-bottom:10px;")
+        subtitle = QLabel("Login after admin approval") ; subtitle.setAlignment(Qt.AlignCenter); subtitle.setStyleSheet("font-size:14px;color:#6C757D;margin-bottom:20px;")
+        id_container = QWidget(); id_layout = QHBoxLayout(id_container); id_layout.setContentsMargins(0,0,0,0); id_icon = QLabel("👩‍🏫"); id_icon.setStyleSheet("font-size:16px;"); self.id_edit = QLineEdit(); self.id_edit.setPlaceholderText("Teacher ID"); id_layout.addWidget(id_icon); id_layout.addWidget(self.id_edit)
+        pwd_container = QWidget(); pwd_layout = QHBoxLayout(pwd_container); pwd_layout.setContentsMargins(0,0,0,0); pwd_icon = QLabel("🔒"); pwd_icon.setStyleSheet("font-size:16px;"); self.pwd_edit = QLineEdit(); self.pwd_edit.setPlaceholderText("Password"); self.pwd_edit.setEchoMode(QLineEdit.Password); pwd_layout.addWidget(pwd_icon); pwd_layout.addWidget(self.pwd_edit)
+        btn_login = QPushButton("Login"); btn_login.setObjectName("primary"); btn_login.clicked.connect(lambda: on_login(self.id_edit.text(), self.pwd_edit.text()))
+        divider = QWidget(); divider.setFixedHeight(1); divider.setStyleSheet("background-color: #DEE2E6; margin: 15px 0;")
+        signup_container = QWidget(); signup_layout = QHBoxLayout(signup_container); signup_layout.setContentsMargins(0,10,0,0); signup_layout.setAlignment(Qt.AlignCenter)
+        signup_label = QLabel("Don't have an account?"); signup_label.setStyleSheet("color:#6C757D;font-size:14px;")
+        btn_signup = QPushButton("Sign up"); btn_signup.setStyleSheet("background:transparent; color:#4361EE; border:none; text-decoration:underline;"); btn_signup.clicked.connect(on_signup)
+        signup_layout.addWidget(signup_label); signup_layout.addWidget(btn_signup)
+        
+        # Back to main button
+        back_container = QWidget()
+        back_layout = QHBoxLayout(back_container)
+        back_layout.setContentsMargins(0, 10, 0, 0)
+        back_layout.setAlignment(Qt.AlignLeft)
+        
+        if on_back:
+            btn_back = QPushButton("← Back to Main")
+            btn_back.setStyleSheet(
+                "background: transparent; color: #6C757D; border: none; "
+                "font-size: 13px; padding: 5px; text-align: left;"
+            )
+            btn_back.setCursor(Qt.PointingHandCursor)
+            btn_back.clicked.connect(on_back)
+            back_layout.addWidget(btn_back)
+            back_layout.addStretch()
+        
+        card_layout.addWidget(header); card_layout.addWidget(subtitle); card_layout.addWidget(id_container); card_layout.addWidget(pwd_container); card_layout.addWidget(btn_login); card_layout.addWidget(divider); card_layout.addWidget(signup_container)
+        if on_back:
+            card_layout.addWidget(back_container)
+        main_layout.addWidget(login_card); self.setLayout(main_layout)
+    
+    def toggle_password_visibility(self):
+        """Toggle password visibility"""
+        if self.password.echoMode() == QLineEdit.Password:
+            self.password.setEchoMode(QLineEdit.Normal)
+            self.pwd_toggle.setText("🙈")  # See-no-evil monkey
+        else:
+            self.password.setEchoMode(QLineEdit.Password)
+            self.pwd_toggle.setText("👁")  # Eye
+    
+    def toggle_confirm_password_visibility(self):
+        """Toggle confirm password visibility"""
+        if self.confirm.echoMode() == QLineEdit.Password:
+            self.confirm.setEchoMode(QLineEdit.Normal)
+            self.confirm_toggle.setText("🙈")  # See-no-evil monkey
+        else:
+            self.confirm.setEchoMode(QLineEdit.Password)
+            self.confirm_toggle.setText("👁")  # Eye
+
+
 class AdminSignup(QWidget):
-    def __init__(self, on_submit: Callable[[dict], None], on_back: Callable[[], None] = None):
+    def __init__(self, on_submit: Callable[[dict], None], on_back_to_login: Callable[[], None] = None, on_back_to_main: Callable[[], None] = None):
         super().__init__()
 
         # Main container with centered content

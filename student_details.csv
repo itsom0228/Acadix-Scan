@@ -1,8 +1,0 @@
-StudentID,FullName,Email,RollNo,PRN,StudentPhone,ParentPhone,Address,Year,Branch,Semester,SecurityAnswer,PasswordHash
-COEU2041,biradar priti maruti,pritibiradar45@gmail.com,41,2041,7822916528,9380581772,dharashiv,Third Year,Computer,5,manisha,23e8aeb1be03ae724421a584f199e69b73b3d0b5de352077290209356a9eb099
-omkar,om sarpane,om@gmail.com,06,2006,7020859277,7020859277,dharshiv,Third Year,Computer,5,harsh,0b6ff20eac4a3414bd48da8ba771b737a5b6c75ae4ed7f1577a61e61be76ab78
-harsh,harsh bangad,harsh@gmail.com,43,2043,9420366311,9545342895,dharshiv,Third Year,Computer,5,om,fa7e2066129f95aa9232673e605876dccbaebaefd98d7c4dbe2fa0133f41b946
-Manisha,manisha poul,manisha@gmail.com,32,2032,7758026343,8806674343,dharshiv,Third Year,Computer,5,om,6c228d0993b45d4af59986b29b2db8943eddf49bb9a42a0b95fceafd34dd5824
-geeta,Geeta katti,Kattigeeta12@gmail.com,42,2042,8999393491,8999393491,dharshiv,Third Year,Computer,5,om,6ea53a0a20be807b0ae10f10edb0460ff12e5f598997d13bb45c1079493da344
-Rohit,Rohit Bhore,Rohit@gmail.com,10,5010,1236547890,7894563210,dharashiv,Third Year,AI/ML,5,om,96d33a68ab39754683785230a28ecd32ade9c9a9e85ca3143bdcb7572bdbdbfd
-Om,Om sarpane,Omkarsarpane@gmail.com,06,2006,1236547890,01236454789,dharashiv,Third Year,Computer,5,harsh,bfdd41a07db3dcf651c1960cbfa3f11de8ad3d78e577cf0659080b0b3b7193a3

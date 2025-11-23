@@ -11,6 +11,8 @@ STUDENTS_CSV = "student_details.csv"  # Single permanent student credentials fil
 ATTENDANCE_CSV = "attendance.csv"     # Single permanent attendance file
 INTERNAL_MARKS_CSV = "internal_marks.csv"  # Single permanent internal marks file
 ALERTS_CSV = "alerts.csv"  # Low attendance alerts
+TEACHERS_CSV = "teachers.csv"  # Faculty / teacher signup and approval
+ADMINS_CSV = "admins.csv"  # Admin credentials
 
 # File lock to prevent concurrent modifications (Unix only)
 # import fcntl  # Not needed for Windows
@@ -86,6 +88,72 @@ def _ensure_files_exist() -> None:
         ).to_csv(ALERTS_CSV, index=False)
     else:
         print(f"Using existing alerts database: {ALERTS_CSV}")
+    if not os.path.exists(TEACHERS_CSV):
+        print(f"Creating teachers database: {TEACHERS_CSV}")
+        pd.DataFrame(
+            columns=[
+                "TeacherID",
+                "FullName",
+                "Email",
+                "Phone",
+                "Department",
+                "Designation",
+                "PasswordHash",
+                "Status",
+                "SubmittedAt",
+            ]
+        ).to_csv(TEACHERS_CSV, index=False)
+    else:
+        print(f"Using existing teachers database: {TEACHERS_CSV}")
+        # Migration: Ensure Status column exists and migrate from Approved if needed
+        try:
+            df = pd.read_csv(TEACHERS_CSV)
+            if "Status" not in df.columns:
+                if "Approved" in df.columns:
+                    df["Status"] = df["Approved"].apply(lambda x: "Approved" if str(x).lower() == "true" else "Pending")
+                    df = df.drop(columns=["Approved"], errors="ignore")
+                else:
+                    df["Status"] = "Pending"
+                df.to_csv(TEACHERS_CSV, index=False)
+        except Exception:
+            pass
+
+    if not os.path.exists(ADMINS_CSV):
+        print(f"Creating admin database: {ADMINS_CSV}")
+        # Default admin: teacher@coe / Python@313
+        default_admin = pd.DataFrame([{
+            "AdminID": "teacher@coe",
+            "FullName": "System Administrator",
+            "Email": "teacher@coe.com",
+            "PasswordHash": _hash_password("Python@313"),
+        }])
+        default_admin.to_csv(ADMINS_CSV, index=False)
+    else:
+        print(f"Using existing admin database: {ADMINS_CSV}")
+        # Update admin credentials if they don't match
+        try:
+            admins_df = pd.read_csv(ADMINS_CSV, dtype=str).fillna("")
+            # Check if teacher@coe exists, if not add/update it
+            if admins_df.empty or "teacher@coe" not in admins_df["AdminID"].values:
+                # Remove old admin entries and add new one
+                admins_df = pd.DataFrame([{
+                    "AdminID": "teacher@coe",
+                    "FullName": "System Administrator",
+                    "Email": "teacher@coe.com",
+                    "PasswordHash": _hash_password("Python@313"),
+                }])
+                admins_df.to_csv(ADMINS_CSV, index=False)
+                print("Updated admin credentials to teacher@coe / Python@313")
+            else:
+                # Update password hash for teacher@coe if it exists
+                idx = admins_df.index[admins_df["AdminID"] == "teacher@coe"][0]
+                correct_hash = _hash_password("Python@313")
+                if admins_df.at[idx, "PasswordHash"] != correct_hash:
+                    admins_df.at[idx, "PasswordHash"] = correct_hash
+                    admins_df.to_csv(ADMINS_CSV, index=False)
+                    print("Updated admin password hash")
+        except Exception as e:
+            print(f"Error updating admin credentials: {e}")
 
 
 def check_for_duplicate_files() -> None:
@@ -142,6 +210,30 @@ def _load_students_df() -> pd.DataFrame:
         )
 
 
+def _load_teachers_df() -> pd.DataFrame:
+    """Load teachers data (faculty)"""
+    _ensure_files_exist()
+    try:
+        df = pd.read_csv(TEACHERS_CSV, dtype=str).fillna("")
+        if "Approved" not in df.columns:
+            df["Approved"] = "false"
+        return df
+    except Exception:
+        return pd.DataFrame(
+            columns=[
+                "TeacherID",
+                "FullName",
+                "Email",
+                "Phone",
+                "Department",
+                "Designation",
+                "PasswordHash",
+                "Approved",
+                "SubmittedAt",
+            ]
+        ).fillna("")
+
+
 def _save_students_df(df: pd.DataFrame) -> None:
     df.to_csv(STUDENTS_CSV, index=False)
 
@@ -181,6 +273,7 @@ def _load_internal_marks_df() -> pd.DataFrame:
                 "Obtained",
                 "MaxTotal",
                 "Total",
+                "Percentage",
                 "UpdatedAt",
             ]
         ).fillna("")
@@ -188,6 +281,42 @@ def _load_internal_marks_df() -> pd.DataFrame:
 
 def _save_internal_marks_df(df: pd.DataFrame) -> None:
     df.to_csv(INTERNAL_MARKS_CSV, index=False)
+
+
+def _save_teachers_df(df: pd.DataFrame) -> None:
+    df.to_csv(TEACHERS_CSV, index=False)
+
+
+def _load_admins_df() -> pd.DataFrame:
+    """Load admin credentials"""
+    _ensure_files_exist()
+    try:
+        return pd.read_csv(ADMINS_CSV, dtype=str).fillna("")
+    except Exception:
+        return pd.DataFrame(
+            columns=[
+                "AdminID",
+                "FullName",
+                "Email",
+                "PasswordHash",
+            ]
+        ).fillna("")
+
+
+def _save_admins_df(df: pd.DataFrame) -> None:
+    df.to_csv(ADMINS_CSV, index=False)
+
+
+def authenticate_admin(admin_id: str, password: str) -> Tuple[bool, Optional[Dict[str, str]]]:
+    """Authenticate admin user"""
+    admins = _load_admins_df()
+    admin = admins[admins["AdminID"] == str(admin_id)].copy()
+    if admin.empty:
+        return False, None
+    row = admin.iloc[0].to_dict()
+    if row.get("PasswordHash") == _hash_password(password):
+        return True, row
+    return False, None
 
 
 def validate_signup_fields(data: Dict[str, str]) -> Tuple[bool, str]:
@@ -260,6 +389,116 @@ def register_student(data: Dict[str, str]) -> Tuple[bool, str]:
     students = pd.concat([students, pd.DataFrame([new_row])], ignore_index=True)
     _save_students_df(students)
     return True, "Student registered successfully."
+
+
+def register_teacher(data: Dict[str, str]) -> Tuple[bool, str]:
+    """Register a teacher entry with Status='Pending' so admin can approve later."""
+    # minimal validation
+    required = ["TeacherID", "FullName", "Email", "Password", "ConfirmPassword"]
+    for k in required:
+        if not data.get(k, "").strip():
+            return False, f"{k} cannot be empty."
+    if data["Password"] != data["ConfirmPassword"]:
+        return False, "Password and Confirm Password must match."
+
+    teachers = _load_teachers_df()
+    if not teachers[teachers["TeacherID"] == data["TeacherID"]].empty:
+        return False, "Teacher ID already exists."
+
+    new_row = {
+        "TeacherID": data["TeacherID"].strip(),
+        "FullName": data["FullName"].strip(),
+        "Email": data.get("Email", "").strip(),
+        "Phone": data.get("Phone", "").strip(),
+        "Department": data.get("Department", "").strip(),
+        "Designation": data.get("Designation", "").strip(),
+        "PasswordHash": _hash_password(data["Password"]),
+        "Status": "Pending",
+        "SubmittedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    teachers = pd.concat([teachers, pd.DataFrame([new_row])], ignore_index=True)
+    _save_teachers_df(teachers)
+    return True, "Sign up successful! Please wait for admin approval."
+
+
+def list_teachers() -> pd.DataFrame:
+    return _load_teachers_df().copy()
+
+
+def get_teacher_by_id(teacher_id: str) -> Optional[Dict[str, str]]:
+    df = _load_teachers_df()
+    row = df[df["TeacherID"] == str(teacher_id)]
+    if row.empty:
+        return None
+    return row.iloc[0].to_dict()
+
+
+def approve_teacher(teacher_id: str) -> Tuple[bool, str]:
+    df = _load_teachers_df()
+    idx = df.index[df["TeacherID"] == str(teacher_id)]
+    if len(idx) == 0:
+        return False, "Teacher not found"
+    i = idx[0]
+    df.at[i, "Status"] = "Approved"
+    _save_teachers_df(df)
+    return True, "Teacher approved"
+
+
+def reject_teacher(teacher_id: str) -> Tuple[bool, str]:
+    df = _load_teachers_df()
+    if df.empty:
+        return False, "No teachers found"
+    idx = df.index[df["TeacherID"] == str(teacher_id)]
+    if len(idx) == 0:
+        return False, "Teacher not found"
+    i = idx[0]
+    df.at[i, "Status"] = "Rejected"
+    _save_teachers_df(df)
+    return True, "Teacher rejected"
+
+
+def authenticate_teacher(teacher_id: str, password: str) -> Tuple[bool, Optional[Dict[str, str]], str]:
+    """Authenticate teacher - returns (success, user_dict, message)"""
+    df = _load_teachers_df()
+    t = df[df["TeacherID"] == str(teacher_id)].copy()
+    if t.empty:
+        return False, None, "Teacher ID not found."
+    row = t.iloc[0].to_dict()
+    if row.get("PasswordHash") != _hash_password(password):
+        return False, None, "Invalid password."
+    status = row.get("Status", "Pending")
+    if status != "Approved":
+        return False, None, f"Account status is {status}. Please wait for admin approval."
+    return True, row, "Login successful."
+
+
+def get_all_teachers() -> pd.DataFrame:
+    """Get all teachers"""
+    return _load_teachers_df().copy()
+
+
+def update_teacher_status(teacher_id: str, status: str) -> bool:
+    """Update teacher status (Pending, Approved, Rejected)"""
+    teachers = _load_teachers_df()
+    idx = teachers.index[teachers["TeacherID"] == str(teacher_id)]
+    if len(idx) == 0:
+        return False
+    teachers.at[idx[0], "Status"] = status
+    _save_teachers_df(teachers)
+    return True
+
+
+def get_pending_teachers() -> pd.DataFrame:
+    """Get all teachers with Pending status"""
+    teachers = _load_teachers_df()
+    return teachers[teachers["Status"] == "Pending"].copy()
+
+
+def get_pending_teachers_count() -> int:
+    """Get count of teachers waiting for approval"""
+    teachers = _load_teachers_df()
+    pending = teachers[teachers["Status"] == "Pending"]
+    return len(pending)
 
 
 def authenticate_student(student_id: str, password: str) -> Tuple[bool, Optional[Dict[str, str]]]:
@@ -365,23 +604,24 @@ def upsert_internal_marks(rows: pd.DataFrame) -> None:
         branch = str(r.get("Branch", "")).strip()
         sem = str(r.get("Semester", "")).strip()
         name = str(r.get("Name", "")).strip()
+        
+        # Specific max marks logic
         ca1 = _to_int_safe(r.get("CA1", "0"))
         ca2 = _to_int_safe(r.get("CA2", "0"))
         mid = _to_int_safe(r.get("MidSem", "0"))
         sem_exam = _to_int_safe(r.get("SemesterExam", "0"))
-        max_total = _to_int_safe(r.get("MaxTotal", "100"))
-        if max_total <= 0:
-            max_total = 100
-
-        # Clamp to max marks
+        
+        # Clamp to specific max marks
         ca1 = min(ca1, 10)
         ca2 = min(ca2, 10)
         mid = min(mid, 20)
+        sem_exam = min(sem_exam, 60)
+        
         obtained = ca1 + ca2 + mid + sem_exam
-        if obtained > max_total:
-            obtained = max_total
-        total = obtained
-
+        max_total = 100 # Fixed as per requirement
+        
+        percentage = (obtained / max_total) * 100
+        
         mask = (
             (base["PRN"] == prn)
             & (base["Year"] == year)
@@ -400,7 +640,8 @@ def upsert_internal_marks(rows: pd.DataFrame) -> None:
             "SemesterExam": str(sem_exam),
             "Obtained": str(obtained),
             "MaxTotal": str(max_total),
-            "Total": str(total),
+            "Total": str(obtained), # Total is same as obtained for 100 marks
+            "Percentage": f"{percentage:.2f}",
             "UpdatedAt": now,
         }
         if mask.any():
@@ -463,13 +704,32 @@ def mark_attendance_if_absent(prn: str, roll_no: str, name: str, status: str = "
     return True, "Attendance marked successfully."
 
 
-def attendance_summary_for_date(date_str: str) -> Dict[str, int]:
+def attendance_summary_for_date(date_str: str, subject: str = None) -> Dict[str, int]:
+    """Get attendance summary for a date, optionally filtered by subject"""
     df = _load_attendance_df()
     students = _load_students_df()
     total = len(students.index)
-    present = len(df[df["Date"] == date_str].index)
+    
+    # Filter by date
+    date_df = df[df["Date"] == date_str].copy()
+    
+    # Filter by subject if provided
+    if subject and subject != "All Subjects" and "Subject" in date_df.columns:
+        date_df = date_df[date_df["Subject"] == subject]
+    
+    present = len(date_df[date_df["Status"].str.lower() == "present"].index)
     absent = max(total - present, 0)
     return {"total": total, "present": present, "absent": absent}
+
+
+def get_available_subjects() -> list:
+    """Get list of available subjects from attendance records"""
+    df = _load_attendance_df()
+    if "Subject" in df.columns:
+        subjects = df["Subject"].dropna().unique().tolist()
+        subjects = [s for s in subjects if s and str(s).strip()]
+        return sorted(subjects) if subjects else ["General"]
+    return ["General"]
 
 
 def student_attendance_summary_for_date(date_str: str, student_prn: str) -> Dict[str, int]:

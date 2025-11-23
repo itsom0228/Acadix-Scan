@@ -1,1 +1,6 @@
 StudentID,FullName,Email,RollNo,PRN,StudentPhone,ParentPhone,Address,Year,Branch,Semester,SecurityAnswer,PasswordHash
+Omkar,Omkar,Om@gmail.com,06,2006,7820939263,7020859277,dharashiv,Third Year,Computer,5,harsh,bfdd41a07db3dcf651c1960cbfa3f11de8ad3d78e577cf0659080b0b3b7193a3
+priti,priti,priti@gmail.com,41,2041,7822916528,9380581772,dharashiv,Third Year,Computer,5,manisha,8061b7d2587085ca4560ce767fbbcbaf2bf3d48582aabc8732ef2de221f96819
+Geeta,geeta,kattigeeta12@gmail.com,42,2042,8999393491,9423717202,dharashiv,Third Year,Computer,5,manisha,b18044758d50331c3e912bc202c944471b2febc1198987a73b12bf154eec489f
+manisha,manisha,poulmanisha@7gmail.com,32,2032,7758026343,8806676343,dharashiv,Third Year,Computer,5,om,0363601be3eb3ce9fd5e9ece7c3efb510409daca43d078b6493d308bbb5e7964
+Har,Harsh,harshbangad2005@gmail.com,43,2043,9420366311,9545342895,dharashiv,Third Year,Computer,5,om,99e631f54d915de7bd12c8b5b631293ddbce719254f5aacd55331de17e2242b4
